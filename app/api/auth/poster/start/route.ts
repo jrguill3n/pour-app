@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getOAuthUrl } from "@/lib/poster-api";
+import { getOAuthUrl } from "@/lib/pos/connectors/poster";
 
 export async function GET(request: Request) {
   const applicationId = process.env.POSTER_APPLICATION_ID;

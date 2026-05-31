@@ -1,9 +1,11 @@
+import { formatLiters, getRemainingPct, getYieldPct } from "@/lib/core/consumption";
+
 export function remPct(consumed: number, total: number): number {
-  return Math.max(0, Math.min(100, 100 - (consumed / total) * 100));
+  return getRemainingPct(consumed, total);
 }
 
 export function yPct(consumed: number, total: number): string {
-  return ((consumed / total) * 100).toFixed(1);
+  return getYieldPct(consumed, total);
 }
 
 export function yColor(p: number | string): string {
@@ -32,5 +34,5 @@ export function fmtDate(iso: string | null): string {
 }
 
 export function fmtL(ml: number): string {
-  return ml >= 1000 ? `${(ml / 1000).toFixed(1)}L` : `${ml}ml`;
+  return formatLiters(ml);
 }

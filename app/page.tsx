@@ -1,5 +1,9 @@
 import { KegBoard } from "@/components/pour/keg-board";
 
 export default function Page() {
-  return <KegBoard />;
+  return (
+    <main className="h-screen">
+      <KegBoard />
+    </main>
+  );
 }

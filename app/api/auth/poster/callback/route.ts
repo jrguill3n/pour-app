@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { exchangeCodeForToken } from "@/lib/poster-api";
+import { exchangeCodeForToken } from "@/lib/pos/connectors/poster";
 import { sql } from "@/lib/db";
 
 export async function GET(request: Request) {
@@ -56,11 +56,11 @@ export async function GET(request: Request) {
       userId = existingUser[0].id;
     }
 
-    // Upsert account with Poster credentials
+    // Upsert POS account with Poster credentials.
     await sql`
-      INSERT INTO public.accounts (user_id, poster_account_id, access_token)
-      VALUES (${userId}, ${tokenResponse.account_number}, ${tokenResponse.access_token})
-      ON CONFLICT (poster_account_id) 
+      INSERT INTO public.accounts (user_id, pos_provider, pos_account_id, access_token)
+      VALUES (${userId}, 'poster', ${tokenResponse.account_number}, ${tokenResponse.access_token})
+      ON CONFLICT (pos_provider, pos_account_id)
       DO UPDATE SET 
         access_token = ${tokenResponse.access_token},
         updated_at = CURRENT_TIMESTAMP
