@@ -1,11 +1,10 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import type { Barrel, Line, BarConfig } from "@/lib/pour-data";
+import type { Barrel, Line, BarConfig, Template, Product } from "@/lib/core/types";
 import { remPct, yPct, yColor, yBg, yBorder, fmtDate, fmtL } from "@/lib/pour-utils";
 import { WaveIcon, LevelBar } from "./pour-logo";
 import { ProductSelector } from "./product-selector";
-import type { Template, Product } from "@/lib/pour-data";
 
 const lb = {
   fontSize: 11,

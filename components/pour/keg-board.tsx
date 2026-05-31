@@ -1,37 +1,27 @@
 "use client";
 
 import { useState } from "react";
-import {
-  PRODUCTS,
-  EMPLOYEES,
-  INITIAL_LINES,
-  INITIAL_TEMPLATES,
-  INITIAL_BARRELS,
-  INITIAL_BAR_CONFIG,
-  INITIAL_MENU_CONFIG,
-  type Barrel,
-  type Line,
-  type Template,
-  type BarConfig,
-  type MenuConfig,
-} from "@/lib/pour-data";
+import { getKegBoardInitialState } from "@/lib/repositories/mock-pour-repository";
+import type { Barrel, Line, Template, BarConfig, MenuConfig } from "@/lib/core/types";
 import { remPct, yPct, yColor } from "@/lib/pour-utils";
 import { PourLogo } from "./pour-logo";
 import { LineCard } from "./line-card";
 import { DetailPanel } from "./detail-panel";
 import { DashboardTab } from "./dashboard-tab";
 
+const initialState = getKegBoardInitialState();
+
 export function KegBoard() {
   const [tab, setTab] = useState<"dashboard" | "board" | "templates" | "history" | "config" | "menu">("board");
   const [darkMode, setDarkMode] = useState(false);
   const [boardView, setBoardView] = useState<"grid" | "list">("grid");
-  const [barrels, setBarrels] = useState<Barrel[]>(INITIAL_BARRELS);
-  const [templates, setTemplates] = useState<Template[]>(INITIAL_TEMPLATES);
-  const [lines, setLines] = useState<Line[]>(INITIAL_LINES);
+  const [barrels, setBarrels] = useState<Barrel[]>(initialState.barrels);
+  const [templates, setTemplates] = useState<Template[]>(initialState.templates);
+  const [lines, setLines] = useState<Line[]>(initialState.lines);
   const [selectedLineId, setSelectedLineId] = useState<number | null>(1);
-  const [barConfig, setBarConfig] = useState<BarConfig>(INITIAL_BAR_CONFIG);
-  const [_menuConfig] = useState<MenuConfig>(INITIAL_MENU_CONFIG);
-  const currentEmployee = EMPLOYEES[0];
+  const [barConfig, setBarConfig] = useState<BarConfig>(initialState.barConfig);
+  const [_menuConfig] = useState<MenuConfig>(initialState.menuConfig);
+  const currentEmployee = initialState.employees[0];
 
   const getBarrel = (lineId: number) =>
     barrels.find((b) => b.lineId === lineId && b.status === "active");
@@ -455,7 +445,7 @@ export function KegBoard() {
                     key={selectedLineId}
                     line={selectedLine}
                     barrel={selectedBarrel}
-                    products={PRODUCTS}
+                    products={initialState.products}
                     templates={templates}
                     currentEmployee={currentEmployee}
                     onOpen={handleOpen}
@@ -571,7 +561,7 @@ export function KegBoard() {
                         </div>
                       </div>
                       <div className="flex flex-wrap gap-1">
-                        {PRODUCTS.filter((p) => t.external_product_ids.includes(p.external_product_id)).map((p) => (
+                        {initialState.products.filter((p) => t.external_product_ids.includes(p.external_product_id)).map((p) => (
                           <div
                             key={p.id}
                             className="text-[11px] rounded px-2 py-0.5"

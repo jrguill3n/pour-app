@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import type { Product } from "@/lib/pour-data";
+import type { Product } from "@/lib/core/types";
 
 interface ProductSelectorProps {
   products: Product[];

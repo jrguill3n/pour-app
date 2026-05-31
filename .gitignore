@@ -12,6 +12,8 @@ __v0_jsx-dev-runtime.ts
 # Common ignores
 node_modules
 .next/
+data/*.db
+data/*.db-*
 tsconfig.tsbuildinfo
 .DS_Store
 .vercel
