@@ -1,108 +1,43 @@
-export interface Product {
-  id: number;
-  brand: string;
-  variant: string;
-  cupMl: number;
-}
+import type { BarConfig, Barrel, Line, MenuConfig, Product, Template } from "@/lib/core/types";
 
-export interface Line {
-  id: number;
-  note: string;
-}
-
-export interface Template {
-  id: number;
-  brand: string;
-  group: string;
-  productIds: number[];
-  volumeL: number;
-  lastPrice: number;
-  timesUsed: number;
-}
-
-export interface Barrel {
-  id: number;
-  kegId: string;
-  lineId: number;
-  brand: string;
-  group: string;
-  beerStyle: string;
-  abv: number | null;
-  productIds: number[];
-  volumeL: number;
-  pricePaid: number;
-  openedAt: string;
-  openedBy: string;
-  status: 'active' | 'closed';
-  mlConsumed: number;
-  mermaMl: number;
-  closedAt: string | null;
-  closedBy: string | null;
-  editedAt?: string;
-  editedBy?: string;
-  voided?: boolean;
-  revenueBrutoCents?: number;
-  revenueDescuentosCents?: number;
-  revenueNetoCents?: number;
-}
-
-export interface BarConfig {
-  maxMermaPct: number;
-  pricePerMl: number;
-}
-
-export interface MenuConfig {
-  template: string;
-  font: string;
-  fontSub: string;
-  barName: string;
-  tagline?: string;
-  logoUrl: string | null;
-  columns: number;
-  orientation: 'landscape' | 'portrait';
-  cardSize: number;
-  groupBy: 'none' | 'brand' | 'beerStyle' | 'lineId';
-  groupLabel: string;
-  showBrand: boolean;
-  showBeerStyle: boolean;
-  showABV: boolean;
-  showLevel: boolean;
-  showLineNumber: boolean;
-  showFormats: boolean;
-  showPrices: boolean;
-  listFontSize: number;
-  cardStyle: string;
-  customBg: string | null;
-  customAccent: string | null;
-  customText: string | null;
-  customSub: string | null;
-  customCardAccent: string | null;
-}
+export type { BarConfig, Barrel, Line, MenuConfig, Product, Template };
 
 export const EMPLOYEES = ["Carlos V.", "María R.", "Luis T.", "Ana P."];
 
+const mockProduct = (numeric_id: number, brand: string, variant: string, cupMl: number): Product => ({
+  id: numeric_id,
+  external_product_id: String(numeric_id),
+  pos_provider: "mock",
+  name: variant,
+  brand,
+  variant,
+  cupMl,
+  cup_ml: cupMl,
+  price_cents: null,
+});
+
 export const PRODUCTS: Product[] = [
-  { id: 1, brand: "Hercules", variant: "Hombre Pájaro — Sampler", cupMl: 150 },
-  { id: 2, brand: "Hercules", variant: "Hombre Pájaro — Vaso", cupMl: 355 },
-  { id: 3, brand: "Hercules", variant: "Hombre Pájaro — Jarra", cupMl: 1000 },
-  { id: 4, brand: "Hercules", variant: "Golden Ale — Vaso", cupMl: 355 },
-  { id: 5, brand: "Hercules", variant: "Golden Ale — Jarra", cupMl: 1000 },
-  { id: 6, brand: "Hercules", variant: "Stout Oscura — Sampler", cupMl: 150 },
-  { id: 7, brand: "Hercules", variant: "Stout Oscura — Vaso", cupMl: 355 },
-  { id: 8, brand: "Cantina RoRo", variant: "Stout Nocturna — Sampler", cupMl: 150 },
-  { id: 9, brand: "Cantina RoRo", variant: "Stout Nocturna — Vaso", cupMl: 355 },
-  { id: 10, brand: "Cantina RoRo", variant: "Stout Nocturna — Jarra", cupMl: 1000 },
-  { id: 11, brand: "Wendlandt", variant: "Lobo del Mar — Vaso", cupMl: 355 },
-  { id: 12, brand: "Wendlandt", variant: "Lobo del Mar — Jarra", cupMl: 1000 },
-  { id: 13, brand: "Wendlandt", variant: "Expat — Vaso", cupMl: 355 },
-  { id: 14, brand: "Lúpulo Norte", variant: "IPA Salvaje — Sampler", cupMl: 150 },
-  { id: 15, brand: "Lúpulo Norte", variant: "IPA Salvaje — Vaso", cupMl: 355 },
-  { id: 16, brand: "Falling Piano", variant: "Dinamita Imperial — Sampler", cupMl: 150 },
-  { id: 17, brand: "Falling Piano", variant: "Dinamita Imperial — Vaso", cupMl: 355 },
-  { id: 18, brand: "Monstruo de Agua", variant: "Ajolote Pale — Vaso", cupMl: 355 },
-  { id: 19, brand: "Monstruo de Agua", variant: "Ajolote Pale — Jarra", cupMl: 1000 },
-  { id: 20, brand: "Colima Beer", variant: "Pale Ale — Vaso", cupMl: 355 },
-  { id: 21, brand: "Colima Beer", variant: "Pale Ale — Jarra", cupMl: 1000 },
+  mockProduct(1, "Hercules", "Hombre Pájaro — Sampler", 150),
+  mockProduct(2, "Hercules", "Hombre Pájaro — Vaso", 355),
+  mockProduct(3, "Hercules", "Hombre Pájaro — Jarra", 1000),
+  mockProduct(4, "Hercules", "Golden Ale — Vaso", 355),
+  mockProduct(5, "Hercules", "Golden Ale — Jarra", 1000),
+  mockProduct(6, "Hercules", "Stout Oscura — Sampler", 150),
+  mockProduct(7, "Hercules", "Stout Oscura — Vaso", 355),
+  mockProduct(8, "Cantina RoRo", "Stout Nocturna — Sampler", 150),
+  mockProduct(9, "Cantina RoRo", "Stout Nocturna — Vaso", 355),
+  mockProduct(10, "Cantina RoRo", "Stout Nocturna — Jarra", 1000),
+  mockProduct(11, "Wendlandt", "Lobo del Mar — Vaso", 355),
+  mockProduct(12, "Wendlandt", "Lobo del Mar — Jarra", 1000),
+  mockProduct(13, "Wendlandt", "Expat — Vaso", 355),
+  mockProduct(14, "Lúpulo Norte", "IPA Salvaje — Sampler", 150),
+  mockProduct(15, "Lúpulo Norte", "IPA Salvaje — Vaso", 355),
+  mockProduct(16, "Falling Piano", "Dinamita Imperial — Sampler", 150),
+  mockProduct(17, "Falling Piano", "Dinamita Imperial — Vaso", 355),
+  mockProduct(18, "Monstruo de Agua", "Ajolote Pale — Vaso", 355),
+  mockProduct(19, "Monstruo de Agua", "Ajolote Pale — Jarra", 1000),
+  mockProduct(20, "Colima Beer", "Pale Ale — Vaso", 355),
+  mockProduct(21, "Colima Beer", "Pale Ale — Jarra", 1000),
 ];
 
 export const INITIAL_LINES: Line[] = Array.from({ length: 15 }, (_, i) => ({
@@ -111,23 +46,23 @@ export const INITIAL_LINES: Line[] = Array.from({ length: 15 }, (_, i) => ({
 }));
 
 export const INITIAL_TEMPLATES: Template[] = [
-  { id: 1, brand: "Hercules", group: "Hombre Pájaro", productIds: [1, 2, 3], volumeL: 20, lastPrice: 1800, timesUsed: 8 },
-  { id: 2, brand: "Cantina RoRo", group: "Stout Nocturna", productIds: [8, 9, 10], volumeL: 20, lastPrice: 2100, timesUsed: 5 },
-  { id: 3, brand: "Wendlandt", group: "Lobo del Mar", productIds: [11, 12], volumeL: 20, lastPrice: 1950, timesUsed: 6 },
-  { id: 4, brand: "Lúpulo Norte", group: "IPA Salvaje", productIds: [14, 15], volumeL: 20, lastPrice: 1700, timesUsed: 4 },
-  { id: 5, brand: "Hercules", group: "Golden Ale", productIds: [4, 5], volumeL: 30, lastPrice: 2600, timesUsed: 3 },
+  { id: 1, brand: "Hercules", group: "Hombre Pájaro", external_product_ids: ["1", "2", "3"], volumeL: 20, lastPrice: 1800, timesUsed: 8, pos_provider: "mock" },
+  { id: 2, brand: "Cantina RoRo", group: "Stout Nocturna", external_product_ids: ["8", "9", "10"], volumeL: 20, lastPrice: 2100, timesUsed: 5, pos_provider: "mock" },
+  { id: 3, brand: "Wendlandt", group: "Lobo del Mar", external_product_ids: ["11", "12"], volumeL: 20, lastPrice: 1950, timesUsed: 6, pos_provider: "mock" },
+  { id: 4, brand: "Lúpulo Norte", group: "IPA Salvaje", external_product_ids: ["14", "15"], volumeL: 20, lastPrice: 1700, timesUsed: 4, pos_provider: "mock" },
+  { id: 5, brand: "Hercules", group: "Golden Ale", external_product_ids: ["4", "5"], volumeL: 30, lastPrice: 2600, timesUsed: 3, pos_provider: "mock" },
 ];
 
 export const INITIAL_BARRELS: Barrel[] = [
-  { id: 1, revenueBrutoCents: 284000, revenueDescuentosCents: 34000, revenueNetoCents: 250000, kegId: "KEG-2026-000001", lineId: 1, brand: "Hercules", group: "Hombre Pájaro", beerStyle: "IPA", abv: 6.5, productIds: [1, 2, 3], volumeL: 20, pricePaid: 1800, openedAt: "2026-04-30T10:15:00", openedBy: "Carlos V.", status: "active", mlConsumed: 8400, mermaMl: 0, closedAt: null, closedBy: null },
-  { id: 2, revenueBrutoCents: 342000, revenueDescuentosCents: 0, revenueNetoCents: 342000, kegId: "KEG-2026-000002", lineId: 2, brand: "Cantina RoRo", group: "Stout Nocturna", beerStyle: "Stout", abv: 8.2, productIds: [8, 9, 10], volumeL: 20, pricePaid: 2100, openedAt: "2026-04-29T18:00:00", openedBy: "María R.", status: "active", mlConsumed: 17500, mermaMl: 0, closedAt: null, closedBy: null },
-  { id: 3, revenueBrutoCents: 296000, revenueDescuentosCents: 0, revenueNetoCents: 296000, kegId: "KEG-2026-000003", lineId: 4, brand: "Wendlandt", group: "Lobo del Mar", beerStyle: "Pale Ale", abv: 5.2, productIds: [11, 12], volumeL: 20, pricePaid: 1950, openedAt: "2026-04-28T11:00:00", openedBy: "Luis T.", status: "active", mlConsumed: 14200, mermaMl: 0, closedAt: null, closedBy: null },
-  { id: 4, revenueBrutoCents: 198000, revenueDescuentosCents: 28000, revenueNetoCents: 170000, kegId: "KEG-2026-000004", lineId: 5, brand: "Lúpulo Norte", group: "IPA Salvaje", beerStyle: "IPA", abv: 7.1, productIds: [14, 15], volumeL: 20, pricePaid: 1700, openedAt: "2026-04-27T09:00:00", openedBy: "María R.", status: "active", mlConsumed: 12800, mermaMl: 0, closedAt: null, closedBy: null },
-  { id: 5, revenueBrutoCents: 264000, revenueDescuentosCents: 0, revenueNetoCents: 264000, kegId: "KEG-2026-000005", lineId: 7, brand: "Hercules", group: "Golden Ale", beerStyle: "Golden Ale", abv: 4.8, productIds: [4, 5], volumeL: 30, pricePaid: 2600, openedAt: "2026-04-26T10:00:00", openedBy: "Carlos V.", status: "active", mlConsumed: 12000, mermaMl: 0, closedAt: null, closedBy: null },
-  { id: 6, revenueBrutoCents: 182000, revenueDescuentosCents: 0, revenueNetoCents: 182000, kegId: "KEG-2026-000006", lineId: 10, brand: "Falling Piano", group: "Dinamita Imperial", beerStyle: "Imperial Stout", abv: 11.0, productIds: [16, 17], volumeL: 20, pricePaid: 2200, openedAt: "2026-04-25T14:00:00", openedBy: "Ana P.", status: "active", mlConsumed: 9600, mermaMl: 0, closedAt: null, closedBy: null },
-  { id: 7, revenueBrutoCents: 210000, revenueDescuentosCents: 0, revenueNetoCents: 210000, kegId: "KEG-2026-000007", lineId: 15, brand: "Monstruo de Agua", group: "Ajolote Pale (Nitro)", beerStyle: "Pale Ale", abv: 5.5, productIds: [18, 19], volumeL: 20, pricePaid: 2000, openedAt: "2026-04-24T10:00:00", openedBy: "Luis T.", status: "active", mlConsumed: 11200, mermaMl: 0, closedAt: null, closedBy: null },
-  { id: 8, revenueBrutoCents: 320000, revenueDescuentosCents: 42000, revenueNetoCents: 278000, kegId: "KEG-2026-000008", lineId: 3, brand: "Hercules", group: "Golden Ale", beerStyle: "Golden Ale", abv: 4.8, productIds: [4, 5], volumeL: 20, pricePaid: 2400, openedAt: "2026-04-20T10:00:00", openedBy: "Carlos V.", status: "closed", mlConsumed: 17200, mermaMl: 2400, closedAt: "2026-04-25T22:00:00", closedBy: "Carlos V." },
-  { id: 9, revenueBrutoCents: 364000, revenueDescuentosCents: 0, revenueNetoCents: 364000, kegId: "KEG-2026-000009", lineId: 6, brand: "Lúpulo Norte", group: "IPA Salvaje", beerStyle: "IPA", abv: 7.1, productIds: [14, 15], volumeL: 20, pricePaid: 1700, openedAt: "2026-04-18T09:00:00", openedBy: "María R.", status: "closed", mlConsumed: 18800, mermaMl: 1200, closedAt: "2026-04-24T23:00:00", closedBy: "Luis T." },
+  { id: 1, pos_provider: "mock", location_id: null, revenueBrutoCents: 284000, revenueDescuentosCents: 34000, revenueNetoCents: 250000, kegId: "KEG-2026-000001", lineId: 1, brand: "Hercules", group: "Hombre Pájaro", beerStyle: "IPA", abv: 6.5, external_product_ids: ["1", "2", "3"], volumeL: 20, pricePaid: 1800, openedAt: "2026-04-30T10:15:00", openedBy: "Carlos V.", status: "active", mlConsumed: 8400, mermaMl: 0, closedAt: null, closedBy: null },
+  { id: 2, pos_provider: "mock", location_id: null, revenueBrutoCents: 342000, revenueDescuentosCents: 0, revenueNetoCents: 342000, kegId: "KEG-2026-000002", lineId: 2, brand: "Cantina RoRo", group: "Stout Nocturna", beerStyle: "Stout", abv: 8.2, external_product_ids: ["8", "9", "10"], volumeL: 20, pricePaid: 2100, openedAt: "2026-04-29T18:00:00", openedBy: "María R.", status: "active", mlConsumed: 17500, mermaMl: 0, closedAt: null, closedBy: null },
+  { id: 3, pos_provider: "mock", location_id: null, revenueBrutoCents: 296000, revenueDescuentosCents: 0, revenueNetoCents: 296000, kegId: "KEG-2026-000003", lineId: 4, brand: "Wendlandt", group: "Lobo del Mar", beerStyle: "Pale Ale", abv: 5.2, external_product_ids: ["11", "12"], volumeL: 20, pricePaid: 1950, openedAt: "2026-04-28T11:00:00", openedBy: "Luis T.", status: "active", mlConsumed: 14200, mermaMl: 0, closedAt: null, closedBy: null },
+  { id: 4, pos_provider: "mock", location_id: null, revenueBrutoCents: 198000, revenueDescuentosCents: 28000, revenueNetoCents: 170000, kegId: "KEG-2026-000004", lineId: 5, brand: "Lúpulo Norte", group: "IPA Salvaje", beerStyle: "IPA", abv: 7.1, external_product_ids: ["14", "15"], volumeL: 20, pricePaid: 1700, openedAt: "2026-04-27T09:00:00", openedBy: "María R.", status: "active", mlConsumed: 12800, mermaMl: 0, closedAt: null, closedBy: null },
+  { id: 5, pos_provider: "mock", location_id: null, revenueBrutoCents: 264000, revenueDescuentosCents: 0, revenueNetoCents: 264000, kegId: "KEG-2026-000005", lineId: 7, brand: "Hercules", group: "Golden Ale", beerStyle: "Golden Ale", abv: 4.8, external_product_ids: ["4", "5"], volumeL: 30, pricePaid: 2600, openedAt: "2026-04-26T10:00:00", openedBy: "Carlos V.", status: "active", mlConsumed: 12000, mermaMl: 0, closedAt: null, closedBy: null },
+  { id: 6, pos_provider: "mock", location_id: null, revenueBrutoCents: 182000, revenueDescuentosCents: 0, revenueNetoCents: 182000, kegId: "KEG-2026-000006", lineId: 10, brand: "Falling Piano", group: "Dinamita Imperial", beerStyle: "Imperial Stout", abv: 11.0, external_product_ids: ["16", "17"], volumeL: 20, pricePaid: 2200, openedAt: "2026-04-25T14:00:00", openedBy: "Ana P.", status: "active", mlConsumed: 9600, mermaMl: 0, closedAt: null, closedBy: null },
+  { id: 7, pos_provider: "mock", location_id: null, revenueBrutoCents: 210000, revenueDescuentosCents: 0, revenueNetoCents: 210000, kegId: "KEG-2026-000007", lineId: 15, brand: "Monstruo de Agua", group: "Ajolote Pale (Nitro)", beerStyle: "Pale Ale", abv: 5.5, external_product_ids: ["18", "19"], volumeL: 20, pricePaid: 2000, openedAt: "2026-04-24T10:00:00", openedBy: "Luis T.", status: "active", mlConsumed: 11200, mermaMl: 0, closedAt: null, closedBy: null },
+  { id: 8, pos_provider: "mock", location_id: null, revenueBrutoCents: 320000, revenueDescuentosCents: 42000, revenueNetoCents: 278000, kegId: "KEG-2026-000008", lineId: 3, brand: "Hercules", group: "Golden Ale", beerStyle: "Golden Ale", abv: 4.8, external_product_ids: ["4", "5"], volumeL: 20, pricePaid: 2400, openedAt: "2026-04-20T10:00:00", openedBy: "Carlos V.", status: "closed", mlConsumed: 17200, mermaMl: 2400, closedAt: "2026-04-25T22:00:00", closedBy: "Carlos V." },
+  { id: 9, pos_provider: "mock", location_id: null, revenueBrutoCents: 364000, revenueDescuentosCents: 0, revenueNetoCents: 364000, kegId: "KEG-2026-000009", lineId: 6, brand: "Lúpulo Norte", group: "IPA Salvaje", beerStyle: "IPA", abv: 7.1, external_product_ids: ["14", "15"], volumeL: 20, pricePaid: 1700, openedAt: "2026-04-18T09:00:00", openedBy: "María R.", status: "closed", mlConsumed: 18800, mermaMl: 1200, closedAt: "2026-04-24T23:00:00", closedBy: "Luis T." },
 ];
 
 export const INITIAL_BAR_CONFIG: BarConfig = {

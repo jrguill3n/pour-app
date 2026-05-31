@@ -40,17 +40,17 @@ export async function GET(request: Request) {
 
     // Create or get user (using email from Poster)
     const email = tokenResponse.user.email;
-    const existingUser = await sql`
+    const existingUser = (await sql`
       SELECT id FROM public.users WHERE email = ${email}
-    `;
+    `) as Array<{ id: string }>;
 
     let userId: string;
     if (existingUser.length === 0) {
-      const newUser = await sql`
+      const newUser = (await sql`
         INSERT INTO public.users (email)
         VALUES (${email})
         RETURNING id
-      `;
+      `) as Array<{ id: string }>;
       userId = newUser[0].id;
     } else {
       userId = existingUser[0].id;

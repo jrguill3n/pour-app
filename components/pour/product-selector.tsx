@@ -5,8 +5,8 @@ import type { Product } from "@/lib/pour-data";
 
 interface ProductSelectorProps {
   products: Product[];
-  selected: number[];
-  onChange: (ids: number[]) => void;
+  selected: string[];
+  onChange: (ids: string[]) => void;
   darkMode?: boolean;
 }
 
@@ -130,15 +130,15 @@ export function ProductSelector({
                 {brand}
               </div>
               {prods.map((p, i) => {
-                const checked = selected.includes(p.id);
+                const checked = selected.includes(p.external_product_id);
                 return (
                   <div
                     key={p.id}
                     onClick={() =>
                       onChange(
                         checked
-                          ? selected.filter((x) => x !== p.id)
-                          : [...selected, p.id]
+                          ? selected.filter((x) => x !== p.external_product_id)
+                          : [...selected, p.external_product_id]
                       )
                     }
                     className="flex items-center gap-2.5 px-3 py-2 cursor-pointer transition-colors"

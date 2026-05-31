@@ -1,6 +1,19 @@
 import { neon } from "@neondatabase/serverless";
 
-const sql = neon(process.env.DATABASE_URL!);
+let cachedSql: ReturnType<typeof neon> | null = null;
+
+function getSql() {
+  const databaseUrl = process.env.DATABASE_URL;
+
+  if (!databaseUrl) {
+    throw new Error("DATABASE_URL is required before querying the database.");
+  }
+
+  cachedSql ||= neon(databaseUrl);
+  return cachedSql;
+}
+
+const sql = ((strings, ...values) => getSql()(strings, ...values)) as ReturnType<typeof neon>;
 
 // Database Types (matching our schema)
 export interface DbUser {

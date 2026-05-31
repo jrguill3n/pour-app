@@ -25,7 +25,6 @@ export interface Template {
   brand: string;
   group: string;
   external_product_ids: string[];
-  productIds?: number[];
   volumeL: number;
   lastPrice: number;
   timesUsed: number;
@@ -42,7 +41,6 @@ export interface Barrel {
   beerStyle: string;
   abv: number | null;
   external_product_ids: string[];
-  productIds?: number[];
   pos_provider: POSProvider;
   volumeL: number;
   pricePaid: number;

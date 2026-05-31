@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react";
 import type { Barrel, Line, BarConfig } from "@/lib/pour-data";
-import { yPct, yColor } from "@/lib/pour-utils";
+import { yColor } from "@/lib/pour-utils";
 
 interface DashboardTabProps {
   barrels: Barrel[];

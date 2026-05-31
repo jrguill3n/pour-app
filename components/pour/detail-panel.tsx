@@ -2,7 +2,6 @@
 
 import { useState, useMemo } from "react";
 import type { Barrel, Line, BarConfig } from "@/lib/pour-data";
-import { PRODUCTS } from "@/lib/pour-data";
 import { remPct, yPct, yColor, yBg, yBorder, fmtDate, fmtL } from "@/lib/pour-utils";
 import { WaveIcon, LevelBar } from "./pour-logo";
 import { ProductSelector } from "./product-selector";
@@ -43,7 +42,7 @@ interface DetailPanelProps {
       group: string;
       beerStyle?: string;
       abv?: number | null;
-      productIds: number[];
+      external_product_ids: string[];
       volumeL: number;
       pricePaid: number;
       openedBy: string;
@@ -57,7 +56,7 @@ interface DetailPanelProps {
       brand: string;
       group: string;
       beerStyle?: string;
-      productIds: number[];
+      external_product_ids: string[];
       volumeL: number;
       lastPrice: number;
     },
@@ -98,7 +97,7 @@ export function DetailPanel({
     group: "",
     beerStyle: "",
     abv: "",
-    productIds: [] as number[],
+    external_product_ids: [] as string[],
     volumeL: "",
     pricePaid: "",
   });
@@ -138,7 +137,7 @@ export function DetailPanel({
   const isLow = barrel && rPct < 20;
   const isAlmostEmpty = barrel && rPct < 8;
   const barrelProducts = barrel
-    ? products.filter((p) => barrel.productIds.includes(p.id))
+    ? products.filter((p) => barrel.external_product_ids.includes(p.external_product_id))
     : [];
 
   function handleOpenFromTemplate() {
@@ -148,7 +147,7 @@ export function DetailPanel({
     onOpen(line.id, {
       brand: t.brand,
       group: t.group,
-      productIds: t.productIds,
+      external_product_ids: t.external_product_ids,
       volumeL: t.volumeL,
       pricePaid: price,
       openedBy: currentEmployee,
@@ -165,7 +164,7 @@ export function DetailPanel({
           brand: form.brand,
           group: form.group,
           beerStyle: form.beerStyle,
-          productIds: form.productIds,
+          external_product_ids: form.external_product_ids,
           volumeL: parseFloat(form.volumeL),
           lastPrice: parseFloat(form.pricePaid) || 0,
         },
@@ -177,7 +176,7 @@ export function DetailPanel({
       group: form.group,
       beerStyle: form.beerStyle,
       abv: form.abv ? parseFloat(form.abv) : null,
-      productIds: form.productIds,
+      external_product_ids: form.external_product_ids,
       volumeL: parseFloat(form.volumeL),
       pricePaid: parseFloat(form.pricePaid),
       openedBy: currentEmployee,
@@ -187,7 +186,7 @@ export function DetailPanel({
       group: "",
       beerStyle: "",
       abv: "",
-      productIds: [],
+      external_product_ids: [],
       volumeL: "",
       pricePaid: "",
     });
@@ -195,10 +194,10 @@ export function DetailPanel({
     setScreen("view");
   }
 
-  const getProds = (ids: number[]) => products.filter((p) => ids.includes(p.id));
+  const getProds = (ids: string[]) => products.filter((p) => ids.includes(p.external_product_id));
   const manualReady =
     form.group &&
-    form.productIds.length > 0 &&
+    form.external_product_ids.length > 0 &&
     form.volumeL &&
     form.pricePaid;
 
@@ -335,7 +334,7 @@ export function DetailPanel({
                           </div>
                         </div>
                         <div className="flex flex-wrap gap-1">
-                          {getProds(t.productIds).map((p) => (
+                          {getProds(t.external_product_ids).map((p) => (
                             <div
                               key={p.id}
                               className="text-[10px] rounded px-1.5 py-0.5"
@@ -468,22 +467,22 @@ export function DetailPanel({
                 <label style={lb}>
                   Productos vinculados{" "}
                   <span className="text-red-500 text-[10px]">*</span>
-                  {form.productIds.length > 0 && (
+                  {form.external_product_ids.length > 0 && (
                     <span className="ml-1.5 text-primary font-semibold">
-                      · {form.productIds.length} seleccionados
+                      · {form.external_product_ids.length} seleccionados
                     </span>
                   )}
                 </label>
                 <ProductSelector
                   products={products}
-                  selected={form.productIds}
-                  onChange={(ids) => setForm((f) => ({ ...f, productIds: ids }))}
+                  selected={form.external_product_ids}
+                  onChange={(ids) => setForm((f) => ({ ...f, external_product_ids: ids }))}
                   darkMode={darkMode}
                 />
               </div>
-              {form.productIds.length > 0 && (
+              {form.external_product_ids.length > 0 && (
                 <div className="flex flex-wrap gap-1 mb-3">
-                  {getProds(form.productIds).map((p) => (
+                  {getProds(form.external_product_ids).map((p) => (
                     <div
                       key={p.id}
                       className="flex items-center gap-1 rounded text-[11px] px-2 py-1"
@@ -498,7 +497,7 @@ export function DetailPanel({
                         onClick={() =>
                           setForm((f) => ({
                             ...f,
-                            productIds: f.productIds.filter((x) => x !== p.id),
+                            external_product_ids: f.external_product_ids.filter((x) => x !== p.external_product_id),
                           }))
                         }
                         className="text-red-300 hover:text-red-500"

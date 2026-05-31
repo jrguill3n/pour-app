@@ -30,7 +30,7 @@ export function KegBoard() {
   const [lines, setLines] = useState<Line[]>(INITIAL_LINES);
   const [selectedLineId, setSelectedLineId] = useState<number | null>(1);
   const [barConfig, setBarConfig] = useState<BarConfig>(INITIAL_BAR_CONFIG);
-  const [_menuConfig, setMenuConfig] = useState<MenuConfig>(INITIAL_MENU_CONFIG);
+  const [_menuConfig] = useState<MenuConfig>(INITIAL_MENU_CONFIG);
   const currentEmployee = EMPLOYEES[0];
 
   const getBarrel = (lineId: number) =>
@@ -52,7 +52,7 @@ export function KegBoard() {
       group: string;
       beerStyle?: string;
       abv?: number | null;
-      productIds: number[];
+      external_product_ids: string[];
       volumeL: number;
       pricePaid: number;
       openedBy: string;
@@ -69,7 +69,9 @@ export function KegBoard() {
         group: data.group,
         beerStyle: data.beerStyle || "",
         abv: data.abv || null,
-        productIds: data.productIds,
+        external_product_ids: data.external_product_ids,
+        pos_provider: "mock",
+        location_id: null,
         volumeL: data.volumeL,
         pricePaid: data.pricePaid,
         openedAt: new Date().toISOString(),
@@ -114,7 +116,7 @@ export function KegBoard() {
       brand: string;
       group: string;
       beerStyle?: string;
-      productIds: number[];
+      external_product_ids: string[];
       volumeL: number;
       lastPrice: number;
     },
@@ -127,7 +129,7 @@ export function KegBoard() {
         (t) => t.group === data.group && t.brand === data.brand
       );
       if (!exists) {
-        setTemplates((ts) => [...ts, { id: Date.now(), ...data, timesUsed: 0 }]);
+        setTemplates((ts) => [...ts, { id: Date.now(), ...data, pos_provider: "mock", timesUsed: 0 }]);
       }
     }
   }
@@ -206,7 +208,7 @@ export function KegBoard() {
           className="text-[11px]"
           style={{ color: darkMode ? "#475569" : "#9ca3af" }}
         >
-          Poster POS ·{" "}
+          Mock POS ·{" "}
           <span
             className="font-medium"
             style={{ color: darkMode ? "#94a3b8" : "#374151" }}
@@ -569,7 +571,7 @@ export function KegBoard() {
                         </div>
                       </div>
                       <div className="flex flex-wrap gap-1">
-                        {PRODUCTS.filter((p) => t.productIds.includes(p.id)).map((p) => (
+                        {PRODUCTS.filter((p) => t.external_product_ids.includes(p.external_product_id)).map((p) => (
                           <div
                             key={p.id}
                             className="text-[11px] rounded px-2 py-0.5"
