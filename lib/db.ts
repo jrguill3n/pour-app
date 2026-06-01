@@ -1,6 +1,19 @@
 import { neon } from "@neondatabase/serverless";
 
-const sql = neon(process.env.DATABASE_URL!);
+let cachedSql: ReturnType<typeof neon> | null = null;
+
+function getSql() {
+  const databaseUrl = process.env.DATABASE_URL;
+
+  if (!databaseUrl) {
+    throw new Error("DATABASE_URL is required before querying the database.");
+  }
+
+  cachedSql ||= neon(databaseUrl);
+  return cachedSql;
+}
+
+const sql = ((strings, ...values) => getSql()(strings, ...values)) as ReturnType<typeof neon>;
 
 // Database Types (matching our schema)
 export interface DbUser {
@@ -12,7 +25,8 @@ export interface DbUser {
 export interface DbAccount {
   id: string;
   user_id: string;
-  poster_account_id: string;
+  pos_provider: string;
+  pos_account_id: string;
   access_token: string;
   refresh_token: string | null;
   token_expires_at: Date | null;
@@ -22,8 +36,9 @@ export interface DbAccount {
 
 export interface DbProduct {
   id: string;
-  account_id: string;
-  poster_product_id: string;
+  merchant_id: string;
+  pos_provider: string;
+  external_product_id: string;
   name: string;
   description: string | null;
   price_cents: number | null;
@@ -33,17 +48,19 @@ export interface DbProduct {
 
 export interface DbEmployee {
   id: string;
-  account_id: string;
-  poster_employee_id: string;
+  merchant_id: string;
+  pos_provider: string;
+  external_employee_id: string;
   name: string;
   created_at: Date;
   updated_at: Date;
 }
 
-export interface DbSpot {
+export interface DbLocation {
   id: string;
-  account_id: string;
-  poster_spot_id: string;
+  merchant_id: string;
+  pos_provider: string;
+  external_location_id: string;
   name: string;
   created_at: Date;
   updated_at: Date;
@@ -51,8 +68,8 @@ export interface DbSpot {
 
 export interface DbProductConfig {
   id: string;
-  account_id: string;
-  product_id: string;
+  merchant_id: string;
+  external_product_id: string;
   cup_ml: number;
   created_at: Date;
   updated_at: Date;
@@ -60,11 +77,12 @@ export interface DbProductConfig {
 
 export interface DbBarrel {
   id: string;
-  account_id: string;
-  spot_id: string | null;
+  merchant_id: string;
+  pos_provider: string;
+  location_id: string | null;
   line_id: number;
   group_name: string | null;
-  product_ids: string[] | null;
+  external_product_ids: string[] | null;
   volume_ml: number;
   price_paid_cents: number | null;
   ml_consumed: number;
@@ -84,7 +102,8 @@ export interface DbBarrel {
 
 export interface DbPollingLog {
   id: string;
-  account_id: string;
+  merchant_id: string;
+  pos_provider: string;
   data_type: string;
   last_polled_at: Date | null;
   created_at: Date;
