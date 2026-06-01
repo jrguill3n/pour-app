@@ -11,7 +11,8 @@
     "db:generate": "drizzle-kit generate",
     "db:push": "mkdir -p data && drizzle-kit push",
     "db:seed": "tsx scripts/seed.ts",
-    "db:setup": "pnpm db:push && pnpm db:seed"
+    "db:setup": "pnpm db:push && pnpm db:seed",
+    "poster:sync": "tsx scripts/sync-poster.ts"
   },
   "dependencies": {
     "@fontsource/dm-mono": "^5.2.7",
