@@ -44,7 +44,7 @@ export interface StoredSaleForConsumption {
 }
 
 function providerFor(context: PersistenceContext, provider?: POSProvider): string {
-  return provider ?? context.posProvider ?? "poster";
+  return provider ?? context.posProvider ?? "mock";
 }
 
 function entityId(provider: string, merchantId: string, externalId: string): string {
@@ -512,6 +512,7 @@ export async function updateBarrelConsumption(
           .update(pg.barrels)
           .set({
             mlConsumed: totals.ml_consumed,
+            yieldPct: sql`case when ${pg.barrels.volumeMl} > 0 then (${totals.ml_consumed} * 10000) / ${pg.barrels.volumeMl} else 0 end`,
             revenueBrutoCents: totals.revenue_bruto_cents,
             revenueDescuentosCents: totals.revenue_descuentos_cents,
             revenueNetoCents: totals.revenue_neto_cents,
@@ -530,6 +531,7 @@ export async function updateBarrelConsumption(
         .update(sqlite.barrels)
         .set({
           mlConsumed: totals.ml_consumed,
+          yieldPct: sql`case when ${sqlite.barrels.volumeMl} > 0 then (${totals.ml_consumed} * 10000) / ${sqlite.barrels.volumeMl} else 0 end`,
           revenueBrutoCents: totals.revenue_bruto_cents,
           revenueDescuentosCents: totals.revenue_descuentos_cents,
           revenueNetoCents: totals.revenue_neto_cents,

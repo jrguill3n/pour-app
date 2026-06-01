@@ -7,6 +7,8 @@ import { EMPLOYEES } from "@/lib/pour-data";
 import * as schema from "@/lib/db/schema/sqlite";
 import type { NormalizedEmployee, NormalizedProduct } from "@/lib/pos/types";
 import { saveEmployees, saveProducts } from "@/lib/db/repositories/pos";
+import { saveAccount } from "@/lib/db/repositories/accounts";
+import { saveUser } from "@/lib/db/repositories/users";
 
 const sqliteUrl = process.env.SQLITE_DATABASE_URL ?? "file:./data/dev.db";
 const sqlitePath = sqliteUrl.startsWith("file:") ? sqliteUrl.slice("file:".length) : sqliteUrl;
@@ -40,6 +42,21 @@ const normalizedEmployees: NormalizedEmployee[] = EMPLOYEES.map((employee, index
 }));
 
 async function main() {
+  const demoUser = await saveUser({
+    email: "demo@pour.local",
+    name: "Pour Demo",
+    raw: { mode: "demo" },
+  });
+
+  await saveAccount({
+    userId: demoUser.id,
+    merchantId,
+    posProvider: "mock",
+    posAccountId: "demo",
+    accessToken: "demo-token",
+    raw: { mode: "demo", provider_label: "Demo POS" },
+  });
+
   await saveProducts({ merchantId, posProvider: "mock" }, normalizedProducts);
   await saveEmployees({ merchantId, posProvider: "mock" }, normalizedEmployees);
 

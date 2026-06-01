@@ -830,7 +830,7 @@ export function DetailPanel({
         >
           {[
             ["Total del barril", fmtL(totalMl)],
-            ["Vendido (Poster)", fmtL(barrel.mlConsumed)],
+            ["Vendido POS", fmtL(barrel.mlConsumed)],
             ["Restante estimado", fmtL(totalMl - barrel.mlConsumed)],
           ].map(([l, v]) => (
             <div
