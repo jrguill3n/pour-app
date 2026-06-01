@@ -12,7 +12,8 @@
     "db:push": "mkdir -p data && drizzle-kit push",
     "db:seed": "tsx scripts/seed.ts",
     "db:setup": "pnpm db:push && pnpm db:seed",
-    "poster:sync": "tsx scripts/sync-poster.ts"
+    "poster:sync": "tsx scripts/sync-poster.ts",
+    "test": "vitest run"
   },
   "dependencies": {
     "@fontsource/dm-mono": "^5.2.7",
@@ -83,6 +84,7 @@
     "tsx": "^4.22.3",
     "tw-animate-css": "1.3.3",
     "typescript": "5.7.3",
-    "typescript-eslint": "^8.60.0"
+    "typescript-eslint": "^8.60.0",
+    "vitest": "^4.1.7"
   }
 }

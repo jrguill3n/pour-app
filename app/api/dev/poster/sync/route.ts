@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { syncPosterCatalog } from "@/lib/pos/sync/poster";
+import { syncPosterManual } from "@/lib/pos/sync/poster";
 
 function isManualSyncAllowed(request: NextRequest): boolean {
   if (process.env.NODE_ENV !== "production") {
@@ -18,14 +18,22 @@ async function handleManualSync(request: NextRequest) {
   }
 
   let posAccountId = request.nextUrl.searchParams.get("pos_account_id") ?? undefined;
+  let from = request.nextUrl.searchParams.get("from") ?? undefined;
+  let to = request.nextUrl.searchParams.get("to") ?? undefined;
 
   if (request.method === "POST" && request.headers.get("content-type")?.includes("application/json")) {
-    const body = (await request.json().catch(() => null)) as { pos_account_id?: string } | null;
+    const body = (await request.json().catch(() => null)) as {
+      pos_account_id?: string;
+      from?: string;
+      to?: string;
+    } | null;
     posAccountId = body?.pos_account_id ?? posAccountId;
+    from = body?.from ?? from;
+    to = body?.to ?? to;
   }
 
   try {
-    const result = await syncPosterCatalog({ posAccountId });
+    const result = await syncPosterManual({ posAccountId, from, to });
     return NextResponse.json({ ok: true, result });
   } catch (error) {
     console.error("Poster manual sync failed:", error);
