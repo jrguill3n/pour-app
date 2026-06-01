@@ -13,6 +13,8 @@ const POSTER_API_URL = "https://joinposter.com/api";
 export interface PosterTokenResponse {
   access_token: string;
   account_number: string;
+  refresh_token?: string;
+  expires_in?: number;
   user: {
     id: number;
     name: string;
