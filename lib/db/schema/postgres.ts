@@ -1,4 +1,4 @@
-import { index, integer, jsonb, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { boolean, index, integer, jsonb, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 
 const timestamps = {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -118,6 +118,9 @@ export const barrels = pgTable(
     mlConsumed: integer("ml_consumed").notNull().default(0),
     mermaMl: integer("merma_ml").notNull().default(0),
     yieldPct: integer("yield_pct_basis_points"),
+    revenueBrutoCents: integer("revenue_bruto_cents").notNull().default(0),
+    revenueDescuentosCents: integer("revenue_descuentos_cents").notNull().default(0),
+    revenueNetoCents: integer("revenue_neto_cents").notNull().default(0),
     status: text("status").notNull().default("active"),
     openedAt: timestamp("opened_at", { withTimezone: true }).notNull(),
     openedBy: text("opened_by"),
@@ -145,6 +148,9 @@ export const normalizedSales = pgTable(
     grossCents: integer("gross_cents").notNull(),
     discountCents: integer("discount_cents").notNull(),
     netCents: integer("net_cents").notNull(),
+    isRefunded: boolean("is_refunded").notNull().default(false),
+    isVoided: boolean("is_voided").notNull().default(false),
+    status: text("status"),
     lineItems: jsonb("line_items").$type<unknown[]>().notNull(),
     raw: jsonb("raw"),
     insertedAt: timestamp("inserted_at", { withTimezone: true }).notNull().defaultNow(),
@@ -168,6 +174,7 @@ export const pollingLogs = pgTable(
     posProvider: text("pos_provider").notNull(),
     dataType: text("data_type").notNull(),
     lastPolledAt: timestamp("last_polled_at", { withTimezone: true }),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
     raw: jsonb("raw"),
     ...timestamps,
   },

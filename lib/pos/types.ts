@@ -50,6 +50,8 @@ export interface NormalizedSaleLineItem {
   quantity: number;
   unit_price_cents: number;
   gross_cents: number;
+  discount_cents?: number;
+  net_cents?: number;
 }
 
 export interface NormalizedSale {
@@ -63,6 +65,9 @@ export interface NormalizedSale {
   gross_cents: number;
   discount_cents: number;
   net_cents: number;
+  is_refunded?: boolean;
+  is_voided?: boolean;
+  status?: string | null;
   line_items: NormalizedSaleLineItem[];
   raw?: unknown;
 }

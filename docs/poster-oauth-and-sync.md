@@ -41,13 +41,16 @@ Manual sync intentionally covers only catalog data:
 - products
 - locations/spots
 - employees
+- transactions
 
-It does not poll transactions.
+It does not run live polling. Transaction sync is manual and idempotent: normalized sales are upserted by `(merchant_id, pos_provider, external_transaction_id)`, then active keg consumption is recalculated from normalized sales instead of incremented.
+
+Consumption metrics are matched by `barrels.external_product_ids` against sale line item `external_product_id` values. Product `cup_ml` is the configurable pour size used to calculate `ml_consumed`; the repository exposes `saveProductCupMlMappings()` for future admin tooling. Refunded or voided sales are persisted but ignored for barrel consumption and revenue metrics.
 
 Local/dev route:
 
 ```bash
-curl -X POST "http://localhost:3000/api/dev/poster/sync?pos_account_id=YOUR_POSTER_ACCOUNT"
+curl -X POST "http://localhost:3000/api/dev/poster/sync?pos_account_id=YOUR_POSTER_ACCOUNT&from=2026-06-01&to=2026-06-02"
 ```
 
 Production requires `DEV_SYNC_SECRET`:
@@ -55,11 +58,11 @@ Production requires `DEV_SYNC_SECRET`:
 ```bash
 curl -X POST \
   -H "x-dev-sync-secret: $DEV_SYNC_SECRET" \
-  "https://your-app.example/api/dev/poster/sync?pos_account_id=YOUR_POSTER_ACCOUNT"
+  "https://your-app.example/api/dev/poster/sync?pos_account_id=YOUR_POSTER_ACCOUNT&from=2026-06-01&to=2026-06-02"
 ```
 
 CLI:
 
 ```bash
-pnpm poster:sync -- --pos-account-id=YOUR_POSTER_ACCOUNT
+pnpm poster:sync -- --pos-account-id=YOUR_POSTER_ACCOUNT --from=2026-06-01 --to=2026-06-02
 ```
