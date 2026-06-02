@@ -3,6 +3,13 @@ import { getDatabase } from "@/lib/db/client";
 import * as pg from "@/lib/db/schema/postgres";
 import * as sqlite from "@/lib/db/schema/sqlite";
 import type { POSProvider } from "@/lib/pos/types";
+import {
+  chooseContext,
+  DEMO_CONTEXT,
+  hasRealConnectedAccount,
+} from "./operations-boundary";
+
+export { chooseContext, DEMO_CONTEXT, hasRealConnectedAccount };
 
 export interface OperationalContext {
   merchantId: string;
@@ -71,11 +78,6 @@ export interface OperationalSnapshot {
   logs: OperationalPollingLog[];
 }
 
-const DEMO_CONTEXT: OperationalContext = {
-  merchantId: "mock-merchant",
-  posProvider: "mock",
-};
-
 function toIso(value: Date | string | number | null | undefined): string | null {
   if (!value) return null;
   const date = value instanceof Date ? value : new Date(value);
@@ -84,22 +86,6 @@ function toIso(value: Date | string | number | null | undefined): string | null 
 
 function productIds(value: string[] | null | undefined): string[] {
   return Array.isArray(value) ? value : [];
-}
-
-function chooseContext(
-  accounts: Array<{ merchantId: string; posProvider: string }>,
-  preferredProvider?: POSProvider
-): OperationalContext {
-  const preferred = preferredProvider
-    ? accounts.find((account) => account.posProvider === preferredProvider)
-    : accounts.find((account) => account.posProvider !== "mock") ?? accounts[0];
-
-  if (!preferred) return DEMO_CONTEXT;
-
-  return {
-    merchantId: preferred.merchantId,
-    posProvider: preferred.posProvider as POSProvider,
-  };
 }
 
 export async function getOperationalSnapshot(
@@ -129,7 +115,7 @@ export async function getOperationalSnapshot(
 
     return {
       context,
-      mode: accountRows.some((account) => account.posProvider !== "mock") ? "connected" : "demo",
+      mode: hasRealConnectedAccount(accountRows) ? "connected" : "demo",
       accounts: accountRows.map((row) => ({
         id: row.id,
         merchantId: row.merchantId,
@@ -203,7 +189,7 @@ export async function getOperationalSnapshot(
 
   return {
     context,
-    mode: accountRows.some((account) => account.posProvider !== "mock") ? "connected" : "demo",
+    mode: hasRealConnectedAccount(accountRows) ? "connected" : "demo",
     accounts: accountRows.map((row) => ({
       id: row.id,
       merchantId: row.merchantId,

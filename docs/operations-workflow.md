@@ -17,6 +17,32 @@ PR #5 adds the first real-world operations surface without changing the Keg Boar
 - `/api/ops/sync` routes by `pos_provider`.
 - Poster is currently the only live connector.
 - Demo mode uses the `mock` provider and does not require Poster credentials.
+- Connected mode never falls back to seeded `mock` products, barrels, templates,
+  or mappings. Real merchants only see records stored under their own
+  `merchant_id` and `pos_provider`.
+
+## Demo Data Boundary
+
+Seeded demo data belongs only to `merchant_id = mock-merchant` and
+`pos_provider = mock`. When any real POS account is connected, Pour prefers that
+real account for operational snapshots and hides demo barrels/templates unless
+the user explicitly requests demo mode.
+
+For a local reset that leaves real synced Poster data untouched, run:
+
+```bash
+pnpm run db:reset-demo
+```
+
+## Poster Read-Only Boundary
+
+Pour treats Poster as a read-only source of truth. Poster sync may read products,
+locations/spots, employees, and transactions, then save normalized copies in
+Pour's database. Barrel opening/closing, product-to-barrel mappings, cup sizes,
+consumption metrics, revenue metrics, and sync logs are local Pour records only.
+
+Do not add Poster create, update, delete, or other mutation calls unless they are
+isolated behind an explicitly disabled integration path.
 
 ## Idempotency
 

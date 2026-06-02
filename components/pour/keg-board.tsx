@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { getKegBoardInitialState } from "@/lib/repositories/mock-pour-repository";
 import type { Barrel, Line, Template, BarConfig, MenuConfig } from "@/lib/core/types";
 import { remPct, yPct, yColor } from "@/lib/pour-utils";
@@ -12,18 +12,62 @@ import { OperationsTab } from "./operations-tab";
 
 const initialState = getKegBoardInitialState();
 
+interface OperationalStatusResponse {
+  ok: boolean;
+  snapshot?: {
+    mode: "demo" | "connected";
+  };
+}
+
 export function KegBoard() {
   const [tab, setTab] = useState<"dashboard" | "board" | "templates" | "history" | "operations" | "config" | "menu">("board");
   const [darkMode, setDarkMode] = useState(false);
   const [boardView, setBoardView] = useState<"grid" | "list">("grid");
+  const [dataMode, setDataMode] = useState<"demo" | "connected" | null>(null);
   const [products, setProducts] = useState(initialState.products);
-  const [barrels, setBarrels] = useState<Barrel[]>(initialState.barrels);
-  const [templates, setTemplates] = useState<Template[]>(initialState.templates);
+  const [barrels, setBarrels] = useState<Barrel[]>([]);
+  const [templates, setTemplates] = useState<Template[]>([]);
   const [lines, setLines] = useState<Line[]>(initialState.lines);
   const [selectedLineId, setSelectedLineId] = useState<number | null>(1);
   const [barConfig, setBarConfig] = useState<BarConfig>(initialState.barConfig);
   const [_menuConfig] = useState<MenuConfig>(initialState.menuConfig);
   const currentEmployee = initialState.employees[0];
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadDataMode() {
+      const response = await fetch("/api/ops/status", { cache: "no-store" });
+      const data = (await response.json()) as OperationalStatusResponse;
+      const nextMode = data.snapshot?.mode ?? "demo";
+
+      if (!active) return;
+
+      setDataMode(nextMode);
+      if (nextMode === "demo") {
+        setProducts(initialState.products);
+        setBarrels(initialState.barrels);
+        setTemplates(initialState.templates);
+        return;
+      }
+
+      setProducts([]);
+      setBarrels([]);
+      setTemplates([]);
+    }
+
+    void loadDataMode().catch(() => {
+      if (!active) return;
+      setDataMode("demo");
+      setProducts(initialState.products);
+      setBarrels(initialState.barrels);
+      setTemplates(initialState.templates);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const getBarrel = (lineId: number) =>
     barrels.find((b) => b.lineId === lineId && b.status === "active");
@@ -221,7 +265,7 @@ export function KegBoard() {
           className="text-[11px]"
           style={{ color: darkMode ? "#475569" : "#9ca3af" }}
         >
-          {barrels.some((b) => b.pos_provider !== "mock") ? "POS conectado" : "Mock POS"} ·{" "}
+          {dataMode === "connected" ? "POS conectado" : "Mock POS"} ·{" "}
           <span
             className="font-medium"
             style={{ color: darkMode ? "#94a3b8" : "#374151" }}
