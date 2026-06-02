@@ -13,6 +13,8 @@ const POSTER_API_URL = "https://joinposter.com/api";
 export interface PosterTokenResponse {
   access_token: string;
   account_number: string;
+  refresh_token?: string;
+  expires_in?: number;
   user: {
     id: number;
     name: string;
@@ -49,11 +51,19 @@ interface PosterTransaction {
   payed_sum?: string;
   sum?: string;
   discount?: string;
+  status?: string;
+  is_refund?: string | boolean;
+  is_refunded?: string | boolean;
+  is_void?: string | boolean;
+  is_voided?: string | boolean;
+  canceled?: string | boolean;
+  refund?: string | boolean;
   products?: {
     product_id: string;
     product_name: string;
     num: string;
     product_price: string;
+    discount?: string;
   }[];
 }
 
@@ -68,6 +78,10 @@ function requireAccessToken(context: POSConnectorContext): string {
 function toCents(value?: string | number | null): number {
   const numeric = typeof value === "number" ? value : Number.parseFloat(value || "0");
   return Number.isFinite(numeric) ? Math.round(numeric * 100) : 0;
+}
+
+function isTruthyFlag(value: unknown): boolean {
+  return value === true || value === 1 || value === "1" || value === "true" || value === "yes";
 }
 
 async function posterApiCall<T>(
@@ -189,16 +203,33 @@ export function normalizePosterSale(
 ): NormalizedSale {
   const discount_cents = toCents(transaction.discount);
   const gross_cents = toCents(transaction.sum || transaction.payed_sum) + discount_cents;
+  const status = transaction.status ?? null;
+  const normalizedStatus = status?.toLowerCase() ?? "";
+  const is_refunded =
+    isTruthyFlag(transaction.is_refund) ||
+    isTruthyFlag(transaction.is_refunded) ||
+    isTruthyFlag(transaction.refund) ||
+    normalizedStatus.includes("refund");
+  const is_voided =
+    isTruthyFlag(transaction.is_void) ||
+    isTruthyFlag(transaction.is_voided) ||
+    isTruthyFlag(transaction.canceled) ||
+    normalizedStatus.includes("void") ||
+    normalizedStatus.includes("cancel");
   const line_items = (transaction.products || []).map((product) => {
     const quantity = Number.parseFloat(product.num || "0") || 0;
     const unit_price_cents = toCents(product.product_price);
+    const item_discount_cents = toCents(product.discount);
+    const item_gross_cents = Math.round(quantity * unit_price_cents);
 
     return {
       external_product_id: product.product_id,
       name: product.product_name,
       quantity,
       unit_price_cents,
-      gross_cents: Math.round(quantity * unit_price_cents),
+      gross_cents: item_gross_cents,
+      discount_cents: item_discount_cents,
+      net_cents: Math.max(0, item_gross_cents - item_discount_cents),
     };
   });
 
@@ -213,6 +244,9 @@ export function normalizePosterSale(
     gross_cents,
     discount_cents,
     net_cents: Math.max(0, gross_cents - discount_cents),
+    is_refunded,
+    is_voided,
+    status,
     line_items,
     raw: transaction,
   };

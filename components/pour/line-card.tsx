@@ -1,6 +1,6 @@
 "use client";
 
-import type { Line, Barrel } from "@/lib/pour-data";
+import type { Line, Barrel } from "@/lib/core/types";
 import { remPct, yPct, yColor, fmtL } from "@/lib/pour-utils";
 import { LevelBar } from "./pour-logo";
 

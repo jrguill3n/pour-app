@@ -1,37 +1,29 @@
 "use client";
 
 import { useState } from "react";
-import {
-  PRODUCTS,
-  EMPLOYEES,
-  INITIAL_LINES,
-  INITIAL_TEMPLATES,
-  INITIAL_BARRELS,
-  INITIAL_BAR_CONFIG,
-  INITIAL_MENU_CONFIG,
-  type Barrel,
-  type Line,
-  type Template,
-  type BarConfig,
-  type MenuConfig,
-} from "@/lib/pour-data";
+import { getKegBoardInitialState } from "@/lib/repositories/mock-pour-repository";
+import type { Barrel, Line, Template, BarConfig, MenuConfig } from "@/lib/core/types";
 import { remPct, yPct, yColor } from "@/lib/pour-utils";
 import { PourLogo } from "./pour-logo";
 import { LineCard } from "./line-card";
 import { DetailPanel } from "./detail-panel";
 import { DashboardTab } from "./dashboard-tab";
+import { OperationsTab } from "./operations-tab";
+
+const initialState = getKegBoardInitialState();
 
 export function KegBoard() {
-  const [tab, setTab] = useState<"dashboard" | "board" | "templates" | "history" | "config" | "menu">("board");
+  const [tab, setTab] = useState<"dashboard" | "board" | "templates" | "history" | "operations" | "config" | "menu">("board");
   const [darkMode, setDarkMode] = useState(false);
   const [boardView, setBoardView] = useState<"grid" | "list">("grid");
-  const [barrels, setBarrels] = useState<Barrel[]>(INITIAL_BARRELS);
-  const [templates, setTemplates] = useState<Template[]>(INITIAL_TEMPLATES);
-  const [lines, setLines] = useState<Line[]>(INITIAL_LINES);
+  const [products, setProducts] = useState(initialState.products);
+  const [barrels, setBarrels] = useState<Barrel[]>(initialState.barrels);
+  const [templates, setTemplates] = useState<Template[]>(initialState.templates);
+  const [lines, setLines] = useState<Line[]>(initialState.lines);
   const [selectedLineId, setSelectedLineId] = useState<number | null>(1);
-  const [barConfig, setBarConfig] = useState<BarConfig>(INITIAL_BAR_CONFIG);
-  const [_menuConfig] = useState<MenuConfig>(INITIAL_MENU_CONFIG);
-  const currentEmployee = EMPLOYEES[0];
+  const [barConfig, setBarConfig] = useState<BarConfig>(initialState.barConfig);
+  const [_menuConfig] = useState<MenuConfig>(initialState.menuConfig);
+  const currentEmployee = initialState.employees[0];
 
   const getBarrel = (lineId: number) =>
     barrels.find((b) => b.lineId === lineId && b.status === "active");
@@ -111,6 +103,26 @@ export function KegBoard() {
     );
   }
 
+  function handleMapLocalBarrel(barrelId: number, externalProductIds: string[]) {
+    setBarrels((bs) =>
+      bs.map((b) =>
+        b.id === barrelId
+          ? { ...b, external_product_ids: externalProductIds, editedAt: new Date().toISOString(), editedBy: currentEmployee }
+          : b
+      )
+    );
+  }
+
+  function handleSetLocalProductCupMl(externalProductId: string, cupMl: number) {
+    setProducts((items) =>
+      items.map((product) =>
+        product.external_product_id === externalProductId
+          ? { ...product, cupMl, cup_ml: cupMl }
+          : product
+      )
+    );
+  }
+
   function handleSaveTemplate(
     data: {
       brand: string;
@@ -185,6 +197,7 @@ export function KegBoard() {
             { key: "board" as const, label: "Keg Board" },
             { key: "templates" as const, label: `Plantillas${templates.length > 0 ? ` (${templates.length})` : ""}` },
             { key: "history" as const, label: "Historial" },
+            { key: "operations" as const, label: "POS" },
             { key: "config" as const, label: "Configuración" },
             { key: "menu" as const, label: "Menú" },
           ].map((t) => (
@@ -208,7 +221,7 @@ export function KegBoard() {
           className="text-[11px]"
           style={{ color: darkMode ? "#475569" : "#9ca3af" }}
         >
-          Mock POS ·{" "}
+          {barrels.some((b) => b.pos_provider !== "mock") ? "POS conectado" : "Mock POS"} ·{" "}
           <span
             className="font-medium"
             style={{ color: darkMode ? "#94a3b8" : "#374151" }}
@@ -455,7 +468,7 @@ export function KegBoard() {
                     key={selectedLineId}
                     line={selectedLine}
                     barrel={selectedBarrel}
-                    products={PRODUCTS}
+                    products={products}
                     templates={templates}
                     currentEmployee={currentEmployee}
                     onOpen={handleOpen}
@@ -571,7 +584,7 @@ export function KegBoard() {
                         </div>
                       </div>
                       <div className="flex flex-wrap gap-1">
-                        {PRODUCTS.filter((p) => t.external_product_ids.includes(p.external_product_id)).map((p) => (
+                        {products.filter((p) => t.external_product_ids.includes(p.external_product_id)).map((p) => (
                           <div
                             key={p.id}
                             className="text-[11px] rounded px-2 py-0.5"
@@ -724,6 +737,24 @@ export function KegBoard() {
                             ${b.pricePaid.toLocaleString()}
                           </span>
                         </div>
+                        <div className="bg-muted rounded px-2 py-1 text-[11px]">
+                          <span className="text-muted-foreground">Bruto: </span>
+                          <span className="font-mono font-semibold">
+                            ${Math.round((b.revenueBrutoCents || 0) / 100).toLocaleString()}
+                          </span>
+                        </div>
+                        <div className="bg-muted rounded px-2 py-1 text-[11px]">
+                          <span className="text-muted-foreground">Desc: </span>
+                          <span className="font-mono font-semibold">
+                            ${Math.round((b.revenueDescuentosCents || 0) / 100).toLocaleString()}
+                          </span>
+                        </div>
+                        <div className="bg-muted rounded px-2 py-1 text-[11px]">
+                          <span className="text-muted-foreground">Neto: </span>
+                          <span className="font-mono font-semibold">
+                            ${Math.round((b.revenueNetoCents || 0) / 100).toLocaleString()}
+                          </span>
+                        </div>
                         {mermaOk ? (
                           <div className="bg-green-50 rounded px-2 py-1 text-[11px] flex items-center gap-1">
                             <span>✅</span>
@@ -750,6 +781,16 @@ export function KegBoard() {
                 })}
             </div>
           </div>
+        )}
+
+        {tab === "operations" && (
+          <OperationsTab
+            barrels={barrels}
+            products={products}
+            darkMode={darkMode}
+            onMapLocalBarrel={handleMapLocalBarrel}
+            onSetLocalProductCupMl={handleSetLocalProductCupMl}
+          />
         )}
 
         {tab === "config" && (

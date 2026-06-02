@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import type { Barrel, Line, BarConfig } from "@/lib/pour-data";
+import type { Barrel, Line, BarConfig } from "@/lib/core/types";
 import { yColor } from "@/lib/pour-utils";
 
 interface DashboardTabProps {
