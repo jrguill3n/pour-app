@@ -40,7 +40,9 @@ export function ProductSelector({
           (!q ||
             p.brand.toLowerCase().includes(q) ||
             p.variant.toLowerCase().includes(q) ||
-            p.name.toLowerCase().includes(q))
+            p.name.toLowerCase().includes(q) ||
+            p.variant_name?.toLowerCase().includes(q) ||
+            p.parent_product_name?.toLowerCase().includes(q))
         );
       }),
     [products, search, brandFilter]

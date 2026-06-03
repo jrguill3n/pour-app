@@ -64,6 +64,12 @@ export const products = pgTable(
     name: text("name").notNull(),
     description: text("description"),
     categoryId: text("category_id"),
+    categoryName: text("category_name"),
+    externalCategoryId: text("external_category_id"),
+    parentExternalProductId: text("parent_external_product_id"),
+    parentProductName: text("parent_product_name"),
+    variantExternalId: text("variant_external_id"),
+    variantName: text("variant_name"),
     priceCents: integer("price_cents"),
     cupMl: integer("cup_ml"),
     raw: jsonb("raw"),
@@ -74,6 +80,27 @@ export const products = pgTable(
       table.merchantId,
       table.posProvider,
       table.externalProductId
+    ),
+  ]
+);
+
+export const posProductCategories = pgTable(
+  "pos_product_categories",
+  {
+    id: text("id").primaryKey(),
+    merchantId: text("merchant_id").notNull(),
+    posProvider: text("pos_provider").notNull(),
+    externalCategoryId: text("external_category_id").notNull(),
+    name: text("name").notNull(),
+    isDraftEligible: boolean("is_draft_eligible").notNull().default(false),
+    raw: jsonb("raw"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("pos_categories_merchant_pos_external_key").on(
+      table.merchantId,
+      table.posProvider,
+      table.externalCategoryId
     ),
   ]
 );

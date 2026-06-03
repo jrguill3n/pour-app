@@ -67,9 +67,22 @@ interface PosterProduct {
   product_id: string;
   product_name: string;
   menu_category_id?: string;
+  category_name?: string;
   cost?: string;
   cost_netto?: string;
   price?: Record<string, string>;
+  modifications?: PosterModification[];
+}
+
+interface PosterModification {
+  modificator_id: string;
+  modificator_name: string;
+  spots?: {
+    spot_id: string;
+    price?: string;
+    profit?: string;
+    visible?: string;
+  }[];
 }
 
 interface PosterEmployee {
@@ -102,10 +115,13 @@ interface PosterTransaction {
   refund?: string | boolean;
   products?: {
     product_id: string;
-    product_name: string;
-    num: string;
-    product_price: string;
-    discount?: string;
+    modification_id?: string | number;
+    product_name?: string;
+    num: string | number;
+    product_price?: string | number;
+    product_sum?: string | number;
+    payed_sum?: string | number;
+    discount?: string | number;
   }[];
 }
 
@@ -219,6 +235,18 @@ function hasTokenResponseShape(body: unknown): body is PosterTokenResponse {
     isRecord(body.user) &&
     typeof body.user.email === "string"
   );
+}
+
+function posterVariantExternalProductId(parentProductId: string | number, variantId?: string | number | null): string {
+  const normalizedVariantId = String(variantId ?? "0");
+  return normalizedVariantId && normalizedVariantId !== "0"
+    ? `${String(parentProductId)}:${normalizedVariantId}`
+    : String(parentProductId);
+}
+
+function variantPriceCents(modification: PosterModification): number {
+  const visibleSpot = modification.spots?.find((spot) => spot.visible !== "0") ?? modification.spots?.[0];
+  return toCents(visibleSpot?.price);
 }
 
 async function posterApiCall<T>(
@@ -351,9 +379,54 @@ export function normalizePosterProduct(
     merchant_id,
     name: product.product_name,
     category_id: product.menu_category_id || null,
+    category_name: product.category_name || null,
+    external_category_id: product.menu_category_id || null,
+    parent_external_product_id: null,
+    parent_product_name: null,
+    variant_external_id: null,
+    variant_name: null,
     price_cents: toCents(firstPrice),
     raw: product,
   };
+}
+
+export function normalizePosterProducts(
+  product: PosterProduct,
+  merchant_id?: string
+): NormalizedProduct[] {
+  const parent = normalizePosterProduct(product, merchant_id);
+  const modifications = product.modifications ?? [];
+
+  if (modifications.length === 0) {
+    return [parent];
+  }
+
+  return [
+    parent,
+    ...modifications.map((modification) => {
+      const variantName = modification.modificator_name.trim();
+      const externalProductId = posterVariantExternalProductId(
+        product.product_id,
+        modification.modificator_id
+      );
+
+      return {
+        ...parent,
+        id: `poster:${externalProductId}`,
+        external_product_id: externalProductId,
+        name: variantName,
+        price_cents: variantPriceCents(modification) || parent.price_cents,
+        parent_external_product_id: product.product_id,
+        parent_product_name: product.product_name,
+        variant_external_id: modification.modificator_id,
+        variant_name: variantName,
+        raw: {
+          parent_product: product,
+          modification,
+        },
+      };
+    }),
+  ];
 }
 
 export function normalizePosterEmployee(
@@ -408,14 +481,21 @@ export function normalizePosterSale(
     normalizedStatus.includes("void") ||
     normalizedStatus.includes("cancel");
   const line_items = (transaction.products || []).map((product) => {
-    const quantity = Number.parseFloat(product.num || "0") || 0;
-    const unit_price_cents = toCents(product.product_price);
+    const quantity = Number.parseFloat(String(product.num || "0")) || 0;
+    const grossSource = product.product_sum ?? product.payed_sum;
+    const unit_price_cents =
+      product.product_price !== undefined
+        ? toCents(product.product_price)
+        : quantity > 0
+        ? Math.round(toCents(grossSource) / quantity)
+        : 0;
     const item_discount_cents = toCents(product.discount);
-    const item_gross_cents = Math.round(quantity * unit_price_cents);
+    const item_gross_cents = grossSource !== undefined ? toCents(grossSource) : Math.round(quantity * unit_price_cents);
+    const externalProductId = posterVariantExternalProductId(product.product_id, product.modification_id);
 
     return {
-      external_product_id: product.product_id,
-      name: product.product_name,
+      external_product_id: externalProductId,
+      name: product.product_name ?? externalProductId,
       quantity,
       unit_price_cents,
       gross_cents: item_gross_cents,
@@ -453,7 +533,7 @@ export const posterConnector: POSConnector = {
   async getProducts(context) {
     const accessToken = requireAccessToken(context);
     const products = await posterApiCall<PosterProduct[]>("menu.getProducts", accessToken);
-    return products.map((product) => normalizePosterProduct(product, context.merchant_id));
+    return products.flatMap((product) => normalizePosterProducts(product, context.merchant_id));
   },
   async getEmployees(context) {
     const accessToken = requireAccessToken(context);

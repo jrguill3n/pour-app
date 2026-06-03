@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { chooseContext, DEMO_CONTEXT, hasRealConnectedAccount } from "./operations-boundary";
+import {
+  chooseContext,
+  DEMO_CONTEXT,
+  filterProductsByEligibleCategories,
+  hasConfiguredDraftCategories,
+  hasRealConnectedAccount,
+} from "./operations-boundary";
 
 describe("operational demo/real boundary", () => {
   const demoAccount = {
@@ -29,5 +35,33 @@ describe("operational demo/real boundary", () => {
   it("detects connected real accounts separately from mock demo accounts", () => {
     expect(hasRealConnectedAccount([demoAccount])).toBe(false);
     expect(hasRealConnectedAccount([demoAccount, posterAccount])).toBe(true);
+  });
+
+  it("shows all products until draft categories are configured", () => {
+    const products = [
+      { externalProductId: "1", externalCategoryId: "food" },
+      { externalProductId: "2", externalCategoryId: "draft" },
+    ];
+
+    expect(hasConfiguredDraftCategories([{ externalCategoryId: "draft", isDraftEligible: false }])).toBe(false);
+    expect(filterProductsByEligibleCategories(products, [])).toEqual(products);
+    expect(
+      filterProductsByEligibleCategories(products, [{ externalCategoryId: "draft", isDraftEligible: false }])
+    ).toEqual(products);
+  });
+
+  it("filters mapping candidates by eligible external category id", () => {
+    const products = [
+      { externalProductId: "burger", externalCategoryId: "food" },
+      { externalProductId: "pint", externalCategoryId: "draft-national" },
+      { externalProductId: "shirt", externalCategoryId: "merch" },
+    ];
+
+    expect(
+      filterProductsByEligibleCategories(products, [
+        { externalCategoryId: "food", isDraftEligible: false },
+        { externalCategoryId: "draft-national", isDraftEligible: true },
+      ])
+    ).toEqual([{ externalProductId: "pint", externalCategoryId: "draft-national" }]);
   });
 });

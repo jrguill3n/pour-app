@@ -9,6 +9,7 @@ import type { NormalizedEmployee, NormalizedProduct } from "@/lib/pos/types";
 import { saveEmployees, saveProducts } from "@/lib/db/repositories/pos";
 import { saveAccount } from "@/lib/db/repositories/accounts";
 import { saveUser } from "@/lib/db/repositories/users";
+import { saveDraftCategoryEligibility } from "@/lib/db/repositories/operations";
 
 const sqliteUrl = process.env.SQLITE_DATABASE_URL ?? "file:./data/dev.db";
 const sqlitePath = sqliteUrl.startsWith("file:") ? sqliteUrl.slice("file:".length) : sqliteUrl;
@@ -26,8 +27,10 @@ const normalizedProducts: NormalizedProduct[] = PRODUCTS.map((product) => ({
   merchant_id: merchantId,
   name: product.name,
   description: product.description ?? null,
-  category_id: product.category_id ?? null,
-  price_cents: product.price_cents ?? null,
+    category_id: product.category_id ?? null,
+    category_name: product.category_name ?? null,
+    external_category_id: product.external_category_id ?? product.category_id ?? null,
+    price_cents: product.price_cents ?? null,
   cup_ml: product.cupMl,
   raw: product,
 }));
@@ -59,6 +62,10 @@ async function main() {
 
   await saveProducts({ merchantId, posProvider: "mock" }, normalizedProducts);
   await saveEmployees({ merchantId, posProvider: "mock" }, normalizedEmployees);
+  await saveDraftCategoryEligibility(
+    { merchantId, posProvider: "mock" },
+    [{ externalCategoryId: "mock-draft", name: "Demo Draft", isDraftEligible: true }]
+  );
 
   await seedDb
     .insert(schema.barrels)

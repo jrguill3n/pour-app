@@ -64,6 +64,12 @@ export const products = sqliteTable(
     name: text("name").notNull(),
     description: text("description"),
     categoryId: text("category_id"),
+    categoryName: text("category_name"),
+    externalCategoryId: text("external_category_id"),
+    parentExternalProductId: text("parent_external_product_id"),
+    parentProductName: text("parent_product_name"),
+    variantExternalId: text("variant_external_id"),
+    variantName: text("variant_name"),
     priceCents: integer("price_cents"),
     cupMl: integer("cup_ml"),
     raw: text("raw", { mode: "json" }),
@@ -74,6 +80,27 @@ export const products = sqliteTable(
       table.merchantId,
       table.posProvider,
       table.externalProductId
+    ),
+  ]
+);
+
+export const posProductCategories = sqliteTable(
+  "pos_product_categories",
+  {
+    id: text("id").primaryKey(),
+    merchantId: text("merchant_id").notNull(),
+    posProvider: text("pos_provider").notNull(),
+    externalCategoryId: text("external_category_id").notNull(),
+    name: text("name").notNull(),
+    isDraftEligible: integer("is_draft_eligible", { mode: "boolean" }).notNull().default(false),
+    raw: text("raw", { mode: "json" }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("pos_categories_merchant_pos_external_key").on(
+      table.merchantId,
+      table.posProvider,
+      table.externalCategoryId
     ),
   ]
 );
