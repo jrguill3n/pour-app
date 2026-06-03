@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useEffect, useState, useMemo } from "react";
 import type { Product } from "@/lib/core/types";
 
 interface ProductSelectorProps {
@@ -19,6 +19,12 @@ export function ProductSelector({
   const [search, setSearch] = useState("");
   const [brandFilter, setBrandFilter] = useState("all");
 
+  useEffect(() => {
+    console.info("Create Keg product selector diagnostics.", {
+      productsReturnedToSelector: products.length,
+    });
+  }, [products.length]);
+
   const brands = useMemo(
     () => ["all", ...new Set(products.map((p) => p.brand))],
     [products]
@@ -33,7 +39,8 @@ export function ProductSelector({
           matchBrand &&
           (!q ||
             p.brand.toLowerCase().includes(q) ||
-            p.variant.toLowerCase().includes(q))
+            p.variant.toLowerCase().includes(q) ||
+            p.name.toLowerCase().includes(q))
         );
       }),
     [products, search, brandFilter]

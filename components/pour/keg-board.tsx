@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { getKegBoardInitialState } from "@/lib/repositories/mock-pour-repository";
-import type { Barrel, Line, Template, BarConfig, MenuConfig } from "@/lib/core/types";
+import type { Barrel, Line, Template, BarConfig, MenuConfig, Product } from "@/lib/core/types";
+import type { POSProvider } from "@/lib/pos/types";
 import { remPct, yPct, yColor } from "@/lib/pour-utils";
 import { PourLogo } from "./pour-logo";
 import { LineCard } from "./line-card";
@@ -12,18 +13,102 @@ import { OperationsTab } from "./operations-tab";
 
 const initialState = getKegBoardInitialState();
 
+interface OperationalStatusResponse {
+  ok: boolean;
+  snapshot?: {
+    mode: "demo" | "connected";
+    context: {
+      merchantId: string;
+      posProvider: string;
+    };
+    products: Array<{
+      id: string;
+      merchantId: string;
+      posProvider: string;
+      externalProductId: string;
+      name: string;
+      cupMl: number | null;
+      priceCents: number | null;
+    }>;
+  };
+}
+
+function productFromOperational(
+  product: NonNullable<OperationalStatusResponse["snapshot"]>["products"][number],
+  index: number
+): Product {
+  return {
+    id: Number.isFinite(Number(product.externalProductId)) ? Number(product.externalProductId) : index + 1,
+    external_product_id: product.externalProductId,
+    pos_provider: product.posProvider as POSProvider,
+    merchant_id: product.merchantId,
+    name: product.name,
+    description: null,
+    category_id: null,
+    price_cents: product.priceCents,
+    cup_ml: product.cupMl,
+    brand: product.name,
+    variant: product.name,
+    cupMl: product.cupMl ?? 0,
+    raw: null,
+  };
+}
+
 export function KegBoard() {
   const [tab, setTab] = useState<"dashboard" | "board" | "templates" | "history" | "operations" | "config" | "menu">("board");
   const [darkMode, setDarkMode] = useState(false);
   const [boardView, setBoardView] = useState<"grid" | "list">("grid");
+  const [dataMode, setDataMode] = useState<"demo" | "connected" | null>(null);
   const [products, setProducts] = useState(initialState.products);
-  const [barrels, setBarrels] = useState<Barrel[]>(initialState.barrels);
-  const [templates, setTemplates] = useState<Template[]>(initialState.templates);
+  const [barrels, setBarrels] = useState<Barrel[]>([]);
+  const [templates, setTemplates] = useState<Template[]>([]);
   const [lines, setLines] = useState<Line[]>(initialState.lines);
   const [selectedLineId, setSelectedLineId] = useState<number | null>(1);
   const [barConfig, setBarConfig] = useState<BarConfig>(initialState.barConfig);
   const [_menuConfig] = useState<MenuConfig>(initialState.menuConfig);
   const currentEmployee = initialState.employees[0];
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadDataMode() {
+      const response = await fetch("/api/ops/status", { cache: "no-store" });
+      const data = (await response.json()) as OperationalStatusResponse;
+      const nextMode = data.snapshot?.mode ?? "demo";
+
+      if (!active) return;
+
+      setDataMode(nextMode);
+      if (nextMode === "demo") {
+        setProducts(initialState.products);
+        setBarrels(initialState.barrels);
+        setTemplates(initialState.templates);
+        return;
+      }
+
+      setBarrels([]);
+      setTemplates([]);
+      setProducts((data.snapshot?.products ?? []).map(productFromOperational));
+      console.info("Create Keg product selector diagnostics.", {
+        mode: nextMode,
+        merchantId: data.snapshot?.context.merchantId,
+        posProvider: data.snapshot?.context.posProvider,
+        productsReturnedToSelector: data.snapshot?.products.length ?? 0,
+      });
+    }
+
+    void loadDataMode().catch(() => {
+      if (!active) return;
+      setDataMode("demo");
+      setProducts(initialState.products);
+      setBarrels(initialState.barrels);
+      setTemplates(initialState.templates);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const getBarrel = (lineId: number) =>
     barrels.find((b) => b.lineId === lineId && b.status === "active");
@@ -221,7 +306,7 @@ export function KegBoard() {
           className="text-[11px]"
           style={{ color: darkMode ? "#475569" : "#9ca3af" }}
         >
-          {barrels.some((b) => b.pos_provider !== "mock") ? "POS conectado" : "Mock POS"} ·{" "}
+          {dataMode === "connected" ? "POS conectado" : "Mock POS"} ·{" "}
           <span
             className="font-medium"
             style={{ color: darkMode ? "#94a3b8" : "#374151" }}

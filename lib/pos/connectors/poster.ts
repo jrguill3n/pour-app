@@ -10,6 +10,9 @@ import type {
 
 const POSTER_API_URL = "https://joinposter.com/api";
 
+// Poster is a read-only POS source of truth for Pour. Connector data methods
+// may fetch catalog and transaction data, but must not mutate Poster records.
+
 export interface PosterTokenResponse {
   access_token: string;
   account_number: string;
@@ -22,6 +25,44 @@ export interface PosterTokenResponse {
   };
 }
 
+export interface PosterTokenExchangeDebug {
+  tokenUrl: string;
+  requestContentType: string;
+  payloadKeys: string[];
+  hasAccount: boolean;
+  account: string | null;
+  status: number;
+  bodyKeys: string[];
+  apiErrorMessage: string | null;
+  sanitizedBody: unknown;
+}
+
+export class PosterOAuthExchangeError extends Error {
+  tokenUrl: string;
+  requestContentType: string;
+  payloadKeys: string[];
+  hasAccount: boolean;
+  account: string | null;
+  status: number;
+  bodyKeys: string[];
+  apiErrorMessage: string | null;
+  sanitizedBody: unknown;
+
+  constructor(debug: PosterTokenExchangeDebug) {
+    super(`Poster OAuth error: ${debug.status}${debug.apiErrorMessage ? ` - ${debug.apiErrorMessage}` : ""}`);
+    this.name = "PosterOAuthExchangeError";
+    this.tokenUrl = debug.tokenUrl;
+    this.requestContentType = debug.requestContentType;
+    this.payloadKeys = debug.payloadKeys;
+    this.hasAccount = debug.hasAccount;
+    this.account = debug.account;
+    this.status = debug.status;
+    this.bodyKeys = debug.bodyKeys;
+    this.apiErrorMessage = debug.apiErrorMessage;
+    this.sanitizedBody = debug.sanitizedBody;
+  }
+}
+
 interface PosterProduct {
   product_id: string;
   product_name: string;
@@ -32,7 +73,8 @@ interface PosterProduct {
 }
 
 interface PosterEmployee {
-  employee_id: string;
+  user_id: string;
+  employee_id?: string;
   name: string;
   role_id?: string;
 }
@@ -67,6 +109,12 @@ interface PosterTransaction {
   }[];
 }
 
+interface PosterTransactionListResponse {
+  count?: number;
+  page?: unknown;
+  data?: PosterTransaction[];
+}
+
 function requireAccessToken(context: POSConnectorContext): string {
   if (!context.accessToken) {
     throw new Error("Poster access token is required.");
@@ -84,11 +132,101 @@ function isTruthyFlag(value: unknown): boolean {
   return value === true || value === 1 || value === "1" || value === "true" || value === "yes";
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function parseJsonBody(text: string): unknown {
+  if (!text) return null;
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function bodyKeys(body: unknown): string[] {
+  return isRecord(body) ? Object.keys(body) : [];
+}
+
+function apiErrorMessage(body: unknown): string | null {
+  if (!isRecord(body)) return null;
+
+  if (isRecord(body.error) && typeof body.error.message === "string") {
+    return body.error.message;
+  }
+
+  for (const key of ["error_description", "error_message", "message", "error"]) {
+    const value = body[key];
+    if (typeof value === "string") {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function responseBodyForLog(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return `[array:${value.length}]`;
+  }
+
+  if (!isRecord(value)) {
+    return sanitizeForLog(value);
+  }
+
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => {
+      const lowerKey = key.toLowerCase();
+      const shouldRedact =
+        lowerKey.includes("token") ||
+        lowerKey.includes("secret") ||
+        lowerKey === "application_secret";
+
+      return [key, shouldRedact ? "[redacted]" : responseBodyForLog(item)];
+    })
+  );
+}
+
+function sanitizeForLog(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeForLog(item));
+  }
+
+  if (!isRecord(value)) {
+    return value;
+  }
+
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => {
+      const lowerKey = key.toLowerCase();
+      const shouldRedact =
+        lowerKey.includes("token") ||
+        lowerKey.includes("secret") ||
+        lowerKey === "application_secret";
+
+      return [key, shouldRedact ? "[redacted]" : sanitizeForLog(item)];
+    })
+  );
+}
+
+function hasTokenResponseShape(body: unknown): body is PosterTokenResponse {
+  return (
+    isRecord(body) &&
+    typeof body.access_token === "string" &&
+    typeof body.account_number === "string" &&
+    isRecord(body.user) &&
+    typeof body.user.email === "string"
+  );
+}
+
 async function posterApiCall<T>(
   endpoint: string,
   accessToken: string,
   params: Record<string, string> = {}
 ): Promise<T> {
+  const method = "GET";
   const url = new URL(`${POSTER_API_URL}/${endpoint}`);
   url.searchParams.set("token", accessToken);
   Object.entries(params).forEach(([key, value]) => {
@@ -96,41 +234,92 @@ async function posterApiCall<T>(
   });
 
   const response = await fetch(url.toString());
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Poster API error: ${response.status} - ${text}`);
+  const text = await response.text();
+  const data = parseJsonBody(text);
+  const diagnostics = {
+    endpoint,
+    method,
+    responseStatus: response.status,
+    sanitizedResponseBody: responseBodyForLog(data ?? text),
+  };
+
+  console.info("Poster API response.", diagnostics);
+
+  if (!response.ok || (isRecord(data) && data.error)) {
+    console.warn("Poster API request failed.", diagnostics);
+    throw new Error(
+      `Poster API error: ${response.status} - ${apiErrorMessage(data) ?? "Unknown Poster API error"}`
+    );
   }
 
-  const data = await response.json();
-  return data.response || data;
+  return (isRecord(data) && "response" in data ? data.response : data) as T;
 }
 
 export async function exchangeCodeForToken(
   code: string,
+  account: string,
   applicationId: string,
   applicationSecret: string,
   redirectUri: string
 ): Promise<PosterTokenResponse> {
-  const response = await fetch(`${POSTER_API_URL}/auth/access_token`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: new URLSearchParams({
-      application_id: applicationId,
-      application_secret: applicationSecret,
-      grant_type: "authorization_code",
-      redirect_uri: redirectUri,
-      code,
-    }),
-  });
+  const { tokenResponse } = await exchangeCodeForTokenWithDebug(
+    code,
+    account,
+    applicationId,
+    applicationSecret,
+    redirectUri
+  );
 
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Poster OAuth error: ${response.status} - ${text}`);
+  return tokenResponse;
+}
+
+export async function exchangeCodeForTokenWithDebug(
+  code: string,
+  account: string,
+  applicationId: string,
+  applicationSecret: string,
+  redirectUri: string
+): Promise<{ tokenResponse: PosterTokenResponse; debug: PosterTokenExchangeDebug }> {
+  const tokenUrl = `https://${account}.joinposter.com/api/v2/auth/access_token`;
+  const payload = new FormData();
+  payload.set("application_id", applicationId);
+  payload.set("application_secret", applicationSecret);
+  payload.set("grant_type", "authorization_code");
+  payload.set("redirect_uri", redirectUri);
+  payload.set("code", code);
+
+  const response = await fetch(tokenUrl, {
+    method: "POST",
+    body: payload,
+  });
+  const text = await response.text();
+  const body = parseJsonBody(text);
+  const debug = {
+    tokenUrl,
+    requestContentType: "multipart/form-data",
+    payloadKeys: [
+      "application_id",
+      "application_secret",
+      "grant_type",
+      "redirect_uri",
+      "code",
+    ],
+    hasAccount: Boolean(account),
+    account: account || null,
+    status: response.status,
+    bodyKeys: bodyKeys(body),
+    apiErrorMessage: apiErrorMessage(body),
+    sanitizedBody: sanitizeForLog(body),
+  };
+
+  if (!response.ok || debug.apiErrorMessage || !hasTokenResponseShape(body)) {
+    throw new PosterOAuthExchangeError(debug);
   }
 
-  return response.json();
+  return {
+    tokenResponse: body,
+    debug,
+  };
 }
 
 export function getOAuthUrl(
@@ -171,9 +360,11 @@ export function normalizePosterEmployee(
   employee: PosterEmployee,
   merchant_id?: string
 ): NormalizedEmployee {
+  const employeeId = employee.employee_id ?? employee.user_id;
+
   return {
-    id: `poster:${employee.employee_id}`,
-    external_employee_id: employee.employee_id,
+    id: `poster:${employeeId}`,
+    external_employee_id: employeeId,
     pos_provider: "poster",
     merchant_id,
     name: employee.name,
@@ -256,7 +447,7 @@ export const posterConnector: POSConnector = {
   provider: "poster",
   async getLocations(context) {
     const accessToken = requireAccessToken(context);
-    const spots = await posterApiCall<PosterSpot[]>("settings.getAllSpots", accessToken);
+    const spots = await posterApiCall<PosterSpot[]>("access.getSpots", accessToken);
     return spots.map((spot) => normalizePosterLocation(spot, context.merchant_id));
   },
   async getProducts(context) {
@@ -271,7 +462,7 @@ export const posterConnector: POSConnector = {
   },
   async getTransactions(context, range: POSDateRange) {
     const accessToken = requireAccessToken(context);
-    const transactions = await posterApiCall<PosterTransaction[]>(
+    const transactions = await posterApiCall<PosterTransaction[] | PosterTransactionListResponse>(
       "transactions.getTransactions",
       accessToken,
       {
@@ -279,6 +470,7 @@ export const posterConnector: POSConnector = {
         date_to: range.to,
       }
     );
-    return transactions.map((transaction) => normalizePosterSale(transaction, context.merchant_id));
+    const rows = Array.isArray(transactions) ? transactions : transactions.data ?? [];
+    return rows.map((transaction) => normalizePosterSale(transaction, context.merchant_id));
   },
 };

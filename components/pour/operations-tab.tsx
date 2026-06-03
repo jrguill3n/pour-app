@@ -164,22 +164,26 @@ export function OperationsTab({
 
   const account = snapshot?.accounts.find((item) => item.posProvider !== "mock") ?? snapshot?.accounts[0] ?? null;
   const lastSync = snapshot?.logs.find((log) => log.lastSyncedAt)?.lastSyncedAt ?? null;
+  const isDemoMode = snapshot?.mode === "demo";
   const dbProducts = snapshot?.products ?? [];
   const usableProducts =
     dbProducts.length > 0
       ? dbProducts
-      : products.map((product) => ({
+      : isDemoMode
+      ? products.map((product) => ({
           id: String(product.id),
           externalProductId: product.external_product_id,
           name: product.name,
           cupMl: product.cupMl,
           priceCents: product.price_cents ?? null,
-        }));
+        }))
+      : [];
   const dbBarrels = snapshot?.barrels ?? [];
   const usableBarrels =
     dbBarrels.length > 0
       ? dbBarrels
-      : barrels.map((barrel) => ({
+      : isDemoMode
+      ? barrels.map((barrel) => ({
           id: String(barrel.id),
           lineId: barrel.lineId,
           kegId: barrel.kegId,
@@ -195,7 +199,8 @@ export function OperationsTab({
           status: barrel.status,
           openedAt: barrel.openedAt,
           closedAt: barrel.closedAt,
-        }));
+        }))
+      : [];
   const activeBarrels = usableBarrels.filter((barrel) => barrel.status === "active");
   const historyBarrels = usableBarrels.filter((barrel) => barrel.status === "closed");
   const unmappedActive = activeBarrels.filter((barrel) => barrel.externalProductIds.length === 0).length;
@@ -426,7 +431,12 @@ export function OperationsTab({
                 </div>
               ) : activeBarrels.length === 0 ? (
                 <div className={cardBase} style={{ background: surface, border: `1.5px solid ${border}`, color: muted }}>
-                  No hay barriles activos. Crea el primero desde Keg Board y vuelve para mapear productos POS.
+                  <div className="text-sm font-semibold" style={{ color: text }}>
+                    No active barrels yet
+                  </div>
+                  <div className="text-xs mt-1">
+                    Create your first barrel
+                  </div>
                 </div>
               ) : (
                 activeBarrels.map((barrel) => {

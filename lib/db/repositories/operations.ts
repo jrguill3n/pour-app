@@ -3,6 +3,13 @@ import { getDatabase } from "@/lib/db/client";
 import * as pg from "@/lib/db/schema/postgres";
 import * as sqlite from "@/lib/db/schema/sqlite";
 import type { POSProvider } from "@/lib/pos/types";
+import {
+  chooseContext,
+  DEMO_CONTEXT,
+  hasRealConnectedAccount,
+} from "./operations-boundary";
+
+export { chooseContext, DEMO_CONTEXT, hasRealConnectedAccount };
 
 export interface OperationalContext {
   merchantId: string;
@@ -71,11 +78,6 @@ export interface OperationalSnapshot {
   logs: OperationalPollingLog[];
 }
 
-const DEMO_CONTEXT: OperationalContext = {
-  merchantId: "mock-merchant",
-  posProvider: "mock",
-};
-
 function toIso(value: Date | string | number | null | undefined): string | null {
   if (!value) return null;
   const date = value instanceof Date ? value : new Date(value);
@@ -86,20 +88,9 @@ function productIds(value: string[] | null | undefined): string[] {
   return Array.isArray(value) ? value : [];
 }
 
-function chooseContext(
-  accounts: Array<{ merchantId: string; posProvider: string }>,
-  preferredProvider?: POSProvider
-): OperationalContext {
-  const preferred = preferredProvider
-    ? accounts.find((account) => account.posProvider === preferredProvider)
-    : accounts.find((account) => account.posProvider !== "mock") ?? accounts[0];
-
-  if (!preferred) return DEMO_CONTEXT;
-
-  return {
-    merchantId: preferred.merchantId,
-    posProvider: preferred.posProvider as POSProvider,
-  };
+function countValue(row: { count: unknown } | undefined): number {
+  const value = row?.count;
+  return typeof value === "number" ? value : Number(value ?? 0);
 }
 
 export async function getOperationalSnapshot(
@@ -126,10 +117,25 @@ export async function getOperationalSnapshot(
         .where(and(eq(pg.pollingLogs.merchantId, context.merchantId), eq(pg.pollingLogs.posProvider, context.posProvider)))
         .orderBy(desc(pg.pollingLogs.updatedAt)),
     ]);
+    const [totalProducts, productsForMerchant624548] = await Promise.all([
+      runtime.db.select({ count: sql<number>`count(*)` }).from(pg.products),
+      runtime.db
+        .select({ count: sql<number>`count(*)` })
+        .from(pg.products)
+        .where(eq(pg.products.merchantId, "624548")),
+    ]);
+
+    console.info("Operational product diagnostics.", {
+      dialect: runtime.dialect,
+      context,
+      totalProductsInDb: countValue(totalProducts[0]),
+      productsForMerchant624548: countValue(productsForMerchant624548[0]),
+      productsReturnedToSelector: productRows.length,
+    });
 
     return {
       context,
-      mode: accountRows.some((account) => account.posProvider !== "mock") ? "connected" : "demo",
+      mode: hasRealConnectedAccount(accountRows) ? "connected" : "demo",
       accounts: accountRows.map((row) => ({
         id: row.id,
         merchantId: row.merchantId,
@@ -200,10 +206,25 @@ export async function getOperationalSnapshot(
       .where(and(eq(sqlite.pollingLogs.merchantId, context.merchantId), eq(sqlite.pollingLogs.posProvider, context.posProvider)))
       .orderBy(desc(sqlite.pollingLogs.updatedAt)),
   ]);
+  const [totalProducts, productsForMerchant624548] = await Promise.all([
+    runtime.db.select({ count: sql<number>`count(*)` }).from(sqlite.products),
+    runtime.db
+      .select({ count: sql<number>`count(*)` })
+      .from(sqlite.products)
+      .where(eq(sqlite.products.merchantId, "624548")),
+  ]);
+
+  console.info("Operational product diagnostics.", {
+    dialect: runtime.dialect,
+    context,
+    totalProductsInDb: countValue(totalProducts[0]),
+    productsForMerchant624548: countValue(productsForMerchant624548[0]),
+    productsReturnedToSelector: productRows.length,
+  });
 
   return {
     context,
-    mode: accountRows.some((account) => account.posProvider !== "mock") ? "connected" : "demo",
+    mode: hasRealConnectedAccount(accountRows) ? "connected" : "demo",
     accounts: accountRows.map((row) => ({
       id: row.id,
       merchantId: row.merchantId,
