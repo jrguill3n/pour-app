@@ -59,6 +59,12 @@ export interface OperationalBarrelLineInput {
   status: string;
 }
 
+export interface OperationalBarrelEditInput {
+  pricePaid?: number | null;
+  volumeL?: number | null;
+  openedBy?: string | null;
+}
+
 export function defaultOperationalLines(count = 15): OperationalLineInput[] {
   return Array.from({ length: count }, (_, index) => {
     const lineNumber = index + 1;
@@ -94,6 +100,20 @@ export function volumeLToVolumeMl(volumeL: number): number {
 
 export function volumeMlToVolumeL(volumeMl: number): number {
   return Number.isFinite(volumeMl) && volumeMl > 0 ? volumeMl / 1000 : 0;
+}
+
+export function normalizeOperationalBarrelEdit(input: OperationalBarrelEditInput) {
+  return {
+    pricePaidCents:
+      typeof input.pricePaid === "number" && Number.isFinite(input.pricePaid)
+        ? Math.round(input.pricePaid * 100)
+        : null,
+    volumeMl:
+      typeof input.volumeL === "number" && Number.isFinite(input.volumeL)
+        ? volumeLToVolumeMl(input.volumeL)
+        : null,
+    openedBy: input.openedBy?.trim() || null,
+  };
 }
 
 export function hasConfiguredDraftCategories(categories: CategoryEligibilityInput[]): boolean {

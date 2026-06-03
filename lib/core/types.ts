@@ -33,6 +33,7 @@ export interface Template {
 
 export interface Barrel {
   id: number;
+  dbId?: string;
   kegId: string;
   location_id: string | null;
   lineId: number;
@@ -43,7 +44,9 @@ export interface Barrel {
   external_product_ids: string[];
   pos_provider: POSProvider;
   volumeL: number;
+  volumeMl?: number | null;
   pricePaid: number;
+  pricePaidCents?: number | null;
   openedAt: string;
   openedBy: string;
   status: "active" | "closed";
@@ -58,6 +61,11 @@ export interface Barrel {
   revenueDescuentosCents?: number;
   revenueNetoCents?: number;
 }
+
+export type BarrelEditFields = Partial<Omit<Barrel, "pricePaid" | "volumeL">> & {
+  pricePaid?: number | null;
+  volumeL?: number | null;
+};
 
 export interface BarConfig {
   maxMermaPct: number;

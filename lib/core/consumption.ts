@@ -115,11 +115,13 @@ export function calculateBarrelConsumption(
       const discountCents =
         item.discount_cents ??
         (sale.gross_cents > 0 ? Math.round((sale.discount_cents * item.gross_cents) / sale.gross_cents) : 0);
-      const netCents = item.net_cents ?? item.gross_cents - discountCents;
+      const grossCents = Math.max(0, item.gross_cents);
+      const netCents = Math.max(0, item.net_cents ?? grossCents - discountCents);
+      const appliedDiscountCents = Math.max(0, item.discount_cents ?? grossCents - netCents);
 
       barrelTotals.ml_consumed += Math.round(item.quantity * cupMl);
-      barrelTotals.revenue_bruto_cents += item.gross_cents;
-      barrelTotals.revenue_descuentos_cents += discountCents;
+      barrelTotals.revenue_bruto_cents += grossCents;
+      barrelTotals.revenue_descuentos_cents += appliedDiscountCents;
       barrelTotals.revenue_neto_cents += netCents;
       totals[barrelId] = barrelTotals;
     }

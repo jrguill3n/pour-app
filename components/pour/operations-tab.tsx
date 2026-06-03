@@ -10,6 +10,12 @@ interface OperationalAccount {
   posProvider: string;
   posAccountId: string;
   connected: boolean;
+  autoSyncEnabled: boolean;
+  syncIntervalMinutes: number;
+  lastSyncAt: string | null;
+  nextSyncAt: string | null;
+  lastSyncStatus: string | null;
+  lastSyncError: string | null;
   updatedAt: string;
 }
 
@@ -148,10 +154,12 @@ export function OperationsTab({
   const [syncing, setSyncing] = useState(false);
   const [savingBarrelId, setSavingBarrelId] = useState<string | null>(null);
   const [savingCategories, setSavingCategories] = useState(false);
+  const [savingSyncSettings, setSavingSyncSettings] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [mappingDrafts, setMappingDrafts] = useState<Record<string, string[]>>({});
   const [cupDrafts, setCupDrafts] = useState<Record<string, string>>({});
   const [eligibleCategoryDrafts, setEligibleCategoryDrafts] = useState<string[]>([]);
+  const [syncIntervalDraft, setSyncIntervalDraft] = useState("5");
 
   const border = darkMode ? "#2a3050" : "#e5e7eb";
   const surface = darkMode ? "#151820" : "#fff";
@@ -184,6 +192,10 @@ export function OperationsTab({
           .filter((category) => category.isDraftEligible)
           .map((category) => category.externalCategoryId)
       );
+      const syncedAccount = data.snapshot.accounts.find((item) => item.posProvider !== "mock") ?? data.snapshot.accounts[0];
+      if (syncedAccount) {
+        setSyncIntervalDraft(String(syncedAccount.syncIntervalMinutes || 5));
+      }
     }
     setLoading(false);
   }
@@ -196,7 +208,7 @@ export function OperationsTab({
   }, []);
 
   const account = snapshot?.accounts.find((item) => item.posProvider !== "mock") ?? snapshot?.accounts[0] ?? null;
-  const lastSync = snapshot?.logs.find((log) => log.lastSyncedAt)?.lastSyncedAt ?? null;
+  const lastSync = account?.lastSyncAt ?? snapshot?.logs.find((log) => log.lastSyncedAt)?.lastSyncedAt ?? null;
   const isDemoMode = snapshot?.mode === "demo";
   const dbProducts = snapshot?.products ?? [];
   const usableProducts =
@@ -286,6 +298,39 @@ export function OperationsTab({
       setMessage("Sync completado. Los barriles activos fueron recalculados.");
     }
     setSyncing(false);
+  }
+
+  async function saveSyncSettings(nextEnabled = account?.autoSyncEnabled ?? true) {
+    if (!account) return;
+
+    setSavingSyncSettings(true);
+    const response = await fetch("/api/ops/sync-settings", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        pos_provider: account.posProvider,
+        pos_account_id: account.posAccountId,
+        auto_sync_enabled: nextEnabled,
+        sync_interval_minutes: Number(syncIntervalDraft) || account.syncIntervalMinutes || 5,
+      }),
+    });
+    const data = (await response.json()) as {
+      ok: boolean;
+      error?: string;
+      snapshot?: OperationalSnapshot;
+    };
+
+    if (!response.ok || !data.ok) {
+      setMessage(data.error ?? "No se pudo guardar la configuracion de auto-sync.");
+    } else {
+      setSnapshot(data.snapshot ?? null);
+      const syncedAccount = data.snapshot?.accounts.find((item) => item.posAccountId === account.posAccountId);
+      if (syncedAccount) {
+        setSyncIntervalDraft(String(syncedAccount.syncIntervalMinutes || 5));
+      }
+      setMessage("Configuracion de auto-sync guardada.");
+    }
+    setSavingSyncSettings(false);
   }
 
   async function saveEligibleCategories() {
@@ -418,7 +463,7 @@ export function OperationsTab({
             style={{ background: "linear-gradient(135deg,#9f1239,#f43f5e)" }}
           >
             <RefreshCcw size={14} className={syncing ? "animate-spin" : ""} />
-            Sync manual
+            Sync Now
           </button>
         </div>
       </div>
@@ -468,7 +513,26 @@ export function OperationsTab({
             </div>
 
             <div className={cardBase} style={{ background: surface, border: `1.5px solid ${border}` }}>
-              <div className={smallLabel}>Sync status</div>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className={smallLabel}>Sync status</div>
+                  <div className="text-sm font-semibold mt-1" style={{ color: text }}>
+                    Auto-sync {account?.autoSyncEnabled ? "ON" : "OFF"}
+                  </div>
+                </div>
+                <button
+                  onClick={() => void saveSyncSettings(!(account?.autoSyncEnabled ?? true))}
+                  disabled={savingSyncSettings || !account}
+                  className="px-2 py-1 rounded-md text-[11px] font-semibold disabled:opacity-60"
+                  style={{
+                    background: account?.autoSyncEnabled ? "#dcfce7" : darkMode ? "#1c2030" : "#f3f4f6",
+                    color: account?.autoSyncEnabled ? "#16a34a" : muted,
+                    border: `1px solid ${border}`,
+                  }}
+                >
+                  {account?.autoSyncEnabled ? "ON" : "OFF"}
+                </button>
+              </div>
               <div className="grid grid-cols-2 gap-2 mt-3">
                 <div>
                   <div className="font-mono text-lg font-bold" style={{ color: text }}>
@@ -485,6 +549,39 @@ export function OperationsTab({
               </div>
               <div className="text-[11px] mt-3" style={{ color: muted }}>
                 Ultimo sync: {fmtDate(lastSync)}
+              </div>
+              <div className="text-[11px] mt-1" style={{ color: muted }}>
+                Proximo sync: {fmtDate(account?.nextSyncAt)}
+              </div>
+              <div className="text-[11px] mt-1" style={{ color: account?.lastSyncStatus === "error" ? "#dc2626" : muted }}>
+                Resultado: {account?.lastSyncStatus ?? "Pendiente"}
+                {account?.lastSyncError ? ` · ${account.lastSyncError}` : ""}
+              </div>
+              <div className="flex items-center gap-2 mt-2">
+                <label className="text-[11px]" style={{ color: muted }}>
+                  Intervalo
+                </label>
+                <input
+                  value={syncIntervalDraft}
+                  onChange={(event) => setSyncIntervalDraft(event.target.value)}
+                  type="number"
+                  min="1"
+                  className="w-16 px-2 py-1 rounded-md text-[11px]"
+                  style={{
+                    background: darkMode ? "#0f1117" : "#fff",
+                    border: `1px solid ${border}`,
+                    color: text,
+                  }}
+                />
+                <span className="text-[11px]" style={{ color: muted }}>min</span>
+                <button
+                  onClick={() => void saveSyncSettings()}
+                  disabled={savingSyncSettings || !account}
+                  className="px-2 py-1 rounded-md text-[11px] font-semibold disabled:opacity-60"
+                  style={{ background: "#111827", color: "#fff" }}
+                >
+                  Guardar
+                </button>
               </div>
             </div>
 
