@@ -88,6 +88,11 @@ function productIds(value: string[] | null | undefined): string[] {
   return Array.isArray(value) ? value : [];
 }
 
+function countValue(row: { count: unknown } | undefined): number {
+  const value = row?.count;
+  return typeof value === "number" ? value : Number(value ?? 0);
+}
+
 export async function getOperationalSnapshot(
   preferredProvider?: POSProvider
 ): Promise<OperationalSnapshot> {
@@ -112,6 +117,21 @@ export async function getOperationalSnapshot(
         .where(and(eq(pg.pollingLogs.merchantId, context.merchantId), eq(pg.pollingLogs.posProvider, context.posProvider)))
         .orderBy(desc(pg.pollingLogs.updatedAt)),
     ]);
+    const [totalProducts, productsForMerchant624548] = await Promise.all([
+      runtime.db.select({ count: sql<number>`count(*)` }).from(pg.products),
+      runtime.db
+        .select({ count: sql<number>`count(*)` })
+        .from(pg.products)
+        .where(eq(pg.products.merchantId, "624548")),
+    ]);
+
+    console.info("Operational product diagnostics.", {
+      dialect: runtime.dialect,
+      context,
+      totalProductsInDb: countValue(totalProducts[0]),
+      productsForMerchant624548: countValue(productsForMerchant624548[0]),
+      productsReturnedToSelector: productRows.length,
+    });
 
     return {
       context,
@@ -186,6 +206,21 @@ export async function getOperationalSnapshot(
       .where(and(eq(sqlite.pollingLogs.merchantId, context.merchantId), eq(sqlite.pollingLogs.posProvider, context.posProvider)))
       .orderBy(desc(sqlite.pollingLogs.updatedAt)),
   ]);
+  const [totalProducts, productsForMerchant624548] = await Promise.all([
+    runtime.db.select({ count: sql<number>`count(*)` }).from(sqlite.products),
+    runtime.db
+      .select({ count: sql<number>`count(*)` })
+      .from(sqlite.products)
+      .where(eq(sqlite.products.merchantId, "624548")),
+  ]);
+
+  console.info("Operational product diagnostics.", {
+    dialect: runtime.dialect,
+    context,
+    totalProductsInDb: countValue(totalProducts[0]),
+    productsForMerchant624548: countValue(productsForMerchant624548[0]),
+    productsReturnedToSelector: productRows.length,
+  });
 
   return {
     context,

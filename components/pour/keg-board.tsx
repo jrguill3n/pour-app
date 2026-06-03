@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { getKegBoardInitialState } from "@/lib/repositories/mock-pour-repository";
-import type { Barrel, Line, Template, BarConfig, MenuConfig } from "@/lib/core/types";
+import type { Barrel, Line, Template, BarConfig, MenuConfig, Product } from "@/lib/core/types";
+import type { POSProvider } from "@/lib/pos/types";
 import { remPct, yPct, yColor } from "@/lib/pour-utils";
 import { PourLogo } from "./pour-logo";
 import { LineCard } from "./line-card";
@@ -16,6 +17,40 @@ interface OperationalStatusResponse {
   ok: boolean;
   snapshot?: {
     mode: "demo" | "connected";
+    context: {
+      merchantId: string;
+      posProvider: string;
+    };
+    products: Array<{
+      id: string;
+      merchantId: string;
+      posProvider: string;
+      externalProductId: string;
+      name: string;
+      cupMl: number | null;
+      priceCents: number | null;
+    }>;
+  };
+}
+
+function productFromOperational(
+  product: NonNullable<OperationalStatusResponse["snapshot"]>["products"][number],
+  index: number
+): Product {
+  return {
+    id: Number.isFinite(Number(product.externalProductId)) ? Number(product.externalProductId) : index + 1,
+    external_product_id: product.externalProductId,
+    pos_provider: product.posProvider as POSProvider,
+    merchant_id: product.merchantId,
+    name: product.name,
+    description: null,
+    category_id: null,
+    price_cents: product.priceCents,
+    cup_ml: product.cupMl,
+    brand: product.name,
+    variant: product.name,
+    cupMl: product.cupMl ?? 0,
+    raw: null,
   };
 }
 
@@ -51,9 +86,15 @@ export function KegBoard() {
         return;
       }
 
-      setProducts([]);
       setBarrels([]);
       setTemplates([]);
+      setProducts((data.snapshot?.products ?? []).map(productFromOperational));
+      console.info("Create Keg product selector diagnostics.", {
+        mode: nextMode,
+        merchantId: data.snapshot?.context.merchantId,
+        posProvider: data.snapshot?.context.posProvider,
+        productsReturnedToSelector: data.snapshot?.products.length ?? 0,
+      });
     }
 
     void loadDataMode().catch(() => {
