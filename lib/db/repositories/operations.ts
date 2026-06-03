@@ -6,10 +6,12 @@ import type { POSProvider } from "@/lib/pos/types";
 import {
   chooseContext,
   DEMO_CONTEXT,
+  filterProductsByEligibleCategories,
   hasRealConnectedAccount,
+  hasConfiguredDraftCategories,
 } from "./operations-boundary";
 
-export { chooseContext, DEMO_CONTEXT, hasRealConnectedAccount };
+export { chooseContext, DEMO_CONTEXT, filterProductsByEligibleCategories, hasRealConnectedAccount };
 
 export interface OperationalContext {
   merchantId: string;
@@ -32,8 +34,24 @@ export interface OperationalProduct {
   posProvider: string;
   externalProductId: string;
   name: string;
+  categoryId: string | null;
+  categoryName: string | null;
+  externalCategoryId: string | null;
+  parentExternalProductId: string | null;
+  parentProductName: string | null;
+  variantExternalId: string | null;
+  variantName: string | null;
   cupMl: number | null;
   priceCents: number | null;
+}
+
+export interface OperationalProductCategory {
+  id: string;
+  merchantId: string;
+  posProvider: string;
+  externalCategoryId: string;
+  name: string;
+  isDraftEligible: boolean;
 }
 
 export interface OperationalBarrel {
@@ -74,6 +92,9 @@ export interface OperationalSnapshot {
   mode: "demo" | "connected";
   accounts: OperationalAccount[];
   products: OperationalProduct[];
+  mappingProducts: OperationalProduct[];
+  productCategories: OperationalProductCategory[];
+  draftCategoriesConfigured: boolean;
   barrels: OperationalBarrel[];
   logs: OperationalPollingLog[];
 }
@@ -93,6 +114,80 @@ function countValue(row: { count: unknown } | undefined): number {
   return typeof value === "number" ? value : Number(value ?? 0);
 }
 
+function categoryEntityId(posProvider: string, merchantId: string, externalCategoryId: string): string {
+  return `${posProvider}:${merchantId}:category:${externalCategoryId}`;
+}
+
+function rawValue(raw: unknown, key: string): string | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const value = (raw as Record<string, unknown>)[key];
+  return typeof value === "string" && value ? value : null;
+}
+
+function rowExternalCategoryId(row: {
+  categoryId: string | null;
+  externalCategoryId: string | null;
+  raw: unknown;
+}): string | null {
+  return row.externalCategoryId ?? row.categoryId ?? rawValue(row.raw, "menu_category_id");
+}
+
+function rowCategoryName(row: {
+  categoryName: string | null;
+  raw: unknown;
+}): string | null {
+  return row.categoryName ?? rawValue(row.raw, "category_name");
+}
+
+function mergeProductCategories(
+  context: OperationalContext,
+  productRows: Array<{
+    categoryId: string | null;
+    categoryName: string | null;
+    externalCategoryId: string | null;
+    raw: unknown;
+  }>,
+  categoryRows: Array<{
+    id: string;
+    merchantId: string;
+    posProvider: string;
+    externalCategoryId: string;
+    name: string;
+    isDraftEligible: boolean;
+  }>
+): OperationalProductCategory[] {
+  const categories = new Map<string, OperationalProductCategory>();
+
+  for (const row of productRows) {
+    const externalCategoryId = rowExternalCategoryId(row);
+    const name = rowCategoryName(row);
+
+    if (!externalCategoryId || !name) continue;
+
+    categories.set(externalCategoryId, {
+      id: categoryEntityId(context.posProvider, context.merchantId, externalCategoryId),
+      merchantId: context.merchantId,
+      posProvider: context.posProvider,
+      externalCategoryId,
+      name,
+      isDraftEligible: false,
+    });
+  }
+
+  for (const row of categoryRows) {
+    categories.set(row.externalCategoryId, {
+      id: row.id,
+      merchantId: row.merchantId,
+      posProvider: row.posProvider,
+      externalCategoryId: row.externalCategoryId,
+      name: row.name,
+      isDraftEligible: row.isDraftEligible,
+    });
+  }
+
+  return [...categories.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
 export async function getOperationalSnapshot(
   preferredProvider?: POSProvider
 ): Promise<OperationalSnapshot> {
@@ -101,11 +196,21 @@ export async function getOperationalSnapshot(
   if (runtime.dialect === "postgres") {
     const accountRows = await runtime.db.select().from(pg.accounts);
     const context = chooseContext(accountRows, preferredProvider);
-    const [productRows, barrelRows, logRows] = await Promise.all([
+    const [productRows, categoryRows, barrelRows, logRows] = await Promise.all([
       runtime.db
         .select()
         .from(pg.products)
         .where(and(eq(pg.products.merchantId, context.merchantId), eq(pg.products.posProvider, context.posProvider))),
+      runtime.db
+        .select()
+        .from(pg.posProductCategories)
+        .where(
+          and(
+            eq(pg.posProductCategories.merchantId, context.merchantId),
+            eq(pg.posProductCategories.posProvider, context.posProvider)
+          )
+        )
+        .orderBy(pg.posProductCategories.name),
       runtime.db
         .select()
         .from(pg.barrels)
@@ -132,6 +237,25 @@ export async function getOperationalSnapshot(
       productsForMerchant624548: countValue(productsForMerchant624548[0]),
       productsReturnedToSelector: productRows.length,
     });
+    const products = productRows.map((row) => ({
+      id: row.id,
+      merchantId: row.merchantId,
+      posProvider: row.posProvider,
+      externalProductId: row.externalProductId,
+      name: row.name,
+      categoryId: row.categoryId,
+      categoryName: rowCategoryName(row),
+      externalCategoryId: rowExternalCategoryId(row),
+      parentExternalProductId: row.parentExternalProductId,
+      parentProductName: row.parentProductName,
+      variantExternalId: row.variantExternalId,
+      variantName: row.variantName,
+      cupMl: row.cupMl,
+      priceCents: row.priceCents,
+    }));
+    const productCategories = mergeProductCategories(context, productRows, categoryRows);
+    const draftCategoriesConfigured = hasConfiguredDraftCategories(productCategories);
+    const mappingProducts = filterProductsByEligibleCategories(products, productCategories);
 
     return {
       context,
@@ -145,15 +269,10 @@ export async function getOperationalSnapshot(
         tokenExpiresAt: toIso(row.tokenExpiresAt),
         updatedAt: toIso(row.updatedAt) ?? new Date().toISOString(),
       })),
-      products: productRows.map((row) => ({
-        id: row.id,
-        merchantId: row.merchantId,
-        posProvider: row.posProvider,
-        externalProductId: row.externalProductId,
-        name: row.name,
-        cupMl: row.cupMl,
-        priceCents: row.priceCents,
-      })),
+      products,
+      mappingProducts,
+      productCategories,
+      draftCategoriesConfigured,
       barrels: barrelRows.map((row) => ({
         id: row.id,
         merchantId: row.merchantId,
@@ -190,11 +309,21 @@ export async function getOperationalSnapshot(
 
   const accountRows = await runtime.db.select().from(sqlite.accounts);
   const context = chooseContext(accountRows, preferredProvider);
-  const [productRows, barrelRows, logRows] = await Promise.all([
+  const [productRows, categoryRows, barrelRows, logRows] = await Promise.all([
     runtime.db
       .select()
       .from(sqlite.products)
       .where(and(eq(sqlite.products.merchantId, context.merchantId), eq(sqlite.products.posProvider, context.posProvider))),
+    runtime.db
+      .select()
+      .from(sqlite.posProductCategories)
+      .where(
+        and(
+          eq(sqlite.posProductCategories.merchantId, context.merchantId),
+          eq(sqlite.posProductCategories.posProvider, context.posProvider)
+        )
+      )
+      .orderBy(sqlite.posProductCategories.name),
     runtime.db
       .select()
       .from(sqlite.barrels)
@@ -221,6 +350,25 @@ export async function getOperationalSnapshot(
     productsForMerchant624548: countValue(productsForMerchant624548[0]),
     productsReturnedToSelector: productRows.length,
   });
+  const products = productRows.map((row) => ({
+    id: row.id,
+    merchantId: row.merchantId,
+    posProvider: row.posProvider,
+    externalProductId: row.externalProductId,
+    name: row.name,
+    categoryId: row.categoryId,
+    categoryName: rowCategoryName(row),
+    externalCategoryId: rowExternalCategoryId(row),
+    parentExternalProductId: row.parentExternalProductId,
+    parentProductName: row.parentProductName,
+    variantExternalId: row.variantExternalId,
+    variantName: row.variantName,
+    cupMl: row.cupMl,
+    priceCents: row.priceCents,
+  }));
+  const productCategories = mergeProductCategories(context, productRows, categoryRows);
+  const draftCategoriesConfigured = hasConfiguredDraftCategories(productCategories);
+  const mappingProducts = filterProductsByEligibleCategories(products, productCategories);
 
   return {
     context,
@@ -234,15 +382,10 @@ export async function getOperationalSnapshot(
       tokenExpiresAt: toIso(row.tokenExpiresAt),
       updatedAt: toIso(row.updatedAt) ?? new Date().toISOString(),
     })),
-    products: productRows.map((row) => ({
-      id: row.id,
-      merchantId: row.merchantId,
-      posProvider: row.posProvider,
-      externalProductId: row.externalProductId,
-      name: row.name,
-      cupMl: row.cupMl,
-      priceCents: row.priceCents,
-    })),
+    products,
+    mappingProducts,
+    productCategories,
+    draftCategoriesConfigured,
     barrels: barrelRows.map((row) => ({
       id: row.id,
       merchantId: row.merchantId,
@@ -343,6 +486,71 @@ export async function saveProductCupMlMapping(
         eq(sqlite.products.externalProductId, externalProductId)
       )
     );
+}
+
+export async function saveDraftCategoryEligibility(
+  context: OperationalContext,
+  categories: Array<{ externalCategoryId: string; name: string; isDraftEligible: boolean }>
+) {
+  const runtime = getDatabase();
+  const now = new Date();
+
+  if (categories.length === 0) return;
+
+  if (runtime.dialect === "postgres") {
+    await runtime.db
+      .insert(pg.posProductCategories)
+      .values(
+        categories.map((category) => ({
+          id: categoryEntityId(context.posProvider, context.merchantId, category.externalCategoryId),
+          merchantId: context.merchantId,
+          posProvider: context.posProvider,
+          externalCategoryId: category.externalCategoryId,
+          name: category.name,
+          isDraftEligible: category.isDraftEligible,
+          updatedAt: now,
+        }))
+      )
+      .onConflictDoUpdate({
+        target: [
+          pg.posProductCategories.merchantId,
+          pg.posProductCategories.posProvider,
+          pg.posProductCategories.externalCategoryId,
+        ],
+        set: {
+          name: sql`excluded.name`,
+          isDraftEligible: sql`excluded.is_draft_eligible`,
+          updatedAt: now,
+        },
+      });
+    return;
+  }
+
+  await runtime.db
+    .insert(sqlite.posProductCategories)
+    .values(
+      categories.map((category) => ({
+        id: categoryEntityId(context.posProvider, context.merchantId, category.externalCategoryId),
+        merchantId: context.merchantId,
+        posProvider: context.posProvider,
+        externalCategoryId: category.externalCategoryId,
+        name: category.name,
+        isDraftEligible: category.isDraftEligible,
+        updatedAt: now,
+      }))
+    )
+    .onConflictDoUpdate({
+      target: [
+        sqlite.posProductCategories.merchantId,
+        sqlite.posProductCategories.posProvider,
+        sqlite.posProductCategories.externalCategoryId,
+      ],
+      set: {
+        name: sql`excluded.name`,
+        isDraftEligible: sql`excluded.is_draft_eligible`,
+        updatedAt: now,
+      },
+    });
 }
 
 export async function appendSyncFailureLog(

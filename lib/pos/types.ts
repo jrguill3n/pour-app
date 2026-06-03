@@ -29,6 +29,12 @@ export interface NormalizedProduct {
   name: string;
   description?: string | null;
   category_id?: string | null;
+  category_name?: string | null;
+  external_category_id?: string | null;
+  parent_external_product_id?: string | null;
+  parent_product_name?: string | null;
+  variant_external_id?: string | null;
+  variant_name?: string | null;
   price_cents?: number | null;
   cup_ml?: number | null;
   raw?: unknown;

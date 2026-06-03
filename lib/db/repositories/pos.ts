@@ -51,6 +51,23 @@ function entityId(provider: string, merchantId: string, externalId: string): str
   return `${provider}:${merchantId}:${externalId}`;
 }
 
+function categoryEntityId(provider: string, merchantId: string, externalId: string): string {
+  return `${provider}:${merchantId}:category:${externalId}`;
+}
+
+function productExternalCategoryId(product: NormalizedProduct): string | null {
+  return product.external_category_id ?? product.category_id ?? null;
+}
+
+function productCategoryName(product: NormalizedProduct): string | null {
+  if (product.category_name) return product.category_name;
+  if (product.raw && typeof product.raw === "object" && !Array.isArray(product.raw)) {
+    const raw = product.raw as Record<string, unknown>;
+    return typeof raw.category_name === "string" ? raw.category_name : null;
+  }
+  return null;
+}
+
 function saleCreatedAt(createdAt: string): Date {
   const date = new Date(createdAt);
   return Number.isNaN(date.getTime()) ? new Date() : date;
@@ -76,6 +93,12 @@ export async function saveProducts(context: PersistenceContext, products: Normal
             name: product.name,
             description: product.description ?? null,
             categoryId: product.category_id ?? null,
+            categoryName: productCategoryName(product),
+            externalCategoryId: productExternalCategoryId(product),
+            parentExternalProductId: product.parent_external_product_id ?? null,
+            parentProductName: product.parent_product_name ?? null,
+            variantExternalId: product.variant_external_id ?? null,
+            variantName: product.variant_name ?? null,
             priceCents: product.price_cents ?? null,
             cupMl: product.cup_ml ?? null,
             raw: product.raw ?? null,
@@ -89,12 +112,19 @@ export async function saveProducts(context: PersistenceContext, products: Normal
           name: sql`excluded.name`,
           description: sql`excluded.description`,
           categoryId: sql`excluded.category_id`,
+          categoryName: sql`excluded.category_name`,
+          externalCategoryId: sql`excluded.external_category_id`,
+          parentExternalProductId: sql`excluded.parent_external_product_id`,
+          parentProductName: sql`excluded.parent_product_name`,
+          variantExternalId: sql`excluded.variant_external_id`,
+          variantName: sql`excluded.variant_name`,
           priceCents: sql`excluded.price_cents`,
           cupMl: sql`excluded.cup_ml`,
           raw: sql`excluded.raw`,
           updatedAt: now,
         },
       });
+    await saveProductCategories(context, products);
     return;
   }
 
@@ -111,6 +141,12 @@ export async function saveProducts(context: PersistenceContext, products: Normal
           name: product.name,
           description: product.description ?? null,
           categoryId: product.category_id ?? null,
+          categoryName: productCategoryName(product),
+          externalCategoryId: productExternalCategoryId(product),
+          parentExternalProductId: product.parent_external_product_id ?? null,
+          parentProductName: product.parent_product_name ?? null,
+          variantExternalId: product.variant_external_id ?? null,
+          variantName: product.variant_name ?? null,
           priceCents: product.price_cents ?? null,
           cupMl: product.cup_ml ?? null,
           raw: product.raw ?? null,
@@ -124,8 +160,103 @@ export async function saveProducts(context: PersistenceContext, products: Normal
         name: sql`excluded.name`,
         description: sql`excluded.description`,
         categoryId: sql`excluded.category_id`,
+        categoryName: sql`excluded.category_name`,
+        externalCategoryId: sql`excluded.external_category_id`,
+        parentExternalProductId: sql`excluded.parent_external_product_id`,
+        parentProductName: sql`excluded.parent_product_name`,
+        variantExternalId: sql`excluded.variant_external_id`,
+        variantName: sql`excluded.variant_name`,
         priceCents: sql`excluded.price_cents`,
         cupMl: sql`excluded.cup_ml`,
+        raw: sql`excluded.raw`,
+        updatedAt: now,
+      },
+    });
+  await saveProductCategories(context, products);
+}
+
+async function saveProductCategories(context: PersistenceContext, products: NormalizedProduct[]) {
+  const categories = new Map<string, {
+    externalCategoryId: string;
+    name: string;
+    posProvider: string;
+    merchantId: string;
+    raw: unknown;
+  }>();
+
+  for (const product of products) {
+    const posProvider = providerFor(context, product.pos_provider);
+    const externalCategoryId = productExternalCategoryId(product);
+    const name = productCategoryName(product);
+
+    if (!externalCategoryId || !name) continue;
+
+    const merchantId = product.merchant_id ?? context.merchantId;
+    categories.set(`${merchantId}:${posProvider}:${externalCategoryId}`, {
+      externalCategoryId,
+      name,
+      posProvider,
+      merchantId,
+      raw: product.raw ?? null,
+    });
+  }
+
+  if (categories.size === 0) return;
+
+  const runtime = getDatabase();
+  const now = new Date();
+  const values = [...categories.values()];
+
+  if (runtime.dialect === "postgres") {
+    await runtime.db
+      .insert(pg.posProductCategories)
+      .values(
+        values.map((category) => ({
+          id: categoryEntityId(category.posProvider, category.merchantId, category.externalCategoryId),
+          merchantId: category.merchantId,
+          posProvider: category.posProvider,
+          externalCategoryId: category.externalCategoryId,
+          name: category.name,
+          raw: category.raw,
+          updatedAt: now,
+        }))
+      )
+      .onConflictDoUpdate({
+        target: [
+          pg.posProductCategories.merchantId,
+          pg.posProductCategories.posProvider,
+          pg.posProductCategories.externalCategoryId,
+        ],
+        set: {
+          name: sql`excluded.name`,
+          raw: sql`excluded.raw`,
+          updatedAt: now,
+        },
+      });
+    return;
+  }
+
+  await runtime.db
+    .insert(sqlite.posProductCategories)
+    .values(
+      values.map((category) => ({
+        id: categoryEntityId(category.posProvider, category.merchantId, category.externalCategoryId),
+        merchantId: category.merchantId,
+        posProvider: category.posProvider,
+        externalCategoryId: category.externalCategoryId,
+        name: category.name,
+        raw: category.raw,
+        updatedAt: now,
+      }))
+    )
+    .onConflictDoUpdate({
+      target: [
+        sqlite.posProductCategories.merchantId,
+        sqlite.posProductCategories.posProvider,
+        sqlite.posProductCategories.externalCategoryId,
+      ],
+      set: {
+        name: sql`excluded.name`,
         raw: sql`excluded.raw`,
         updatedAt: now,
       },

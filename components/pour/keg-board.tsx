@@ -27,6 +27,29 @@ interface OperationalStatusResponse {
       posProvider: string;
       externalProductId: string;
       name: string;
+      categoryId: string | null;
+      categoryName: string | null;
+      externalCategoryId: string | null;
+      parentExternalProductId: string | null;
+      parentProductName: string | null;
+      variantExternalId: string | null;
+      variantName: string | null;
+      cupMl: number | null;
+      priceCents: number | null;
+    }>;
+    mappingProducts: Array<{
+      id: string;
+      merchantId: string;
+      posProvider: string;
+      externalProductId: string;
+      name: string;
+      categoryId: string | null;
+      categoryName: string | null;
+      externalCategoryId: string | null;
+      parentExternalProductId: string | null;
+      parentProductName: string | null;
+      variantExternalId: string | null;
+      variantName: string | null;
       cupMl: number | null;
       priceCents: number | null;
     }>;
@@ -44,11 +67,19 @@ function productFromOperational(
     merchant_id: product.merchantId,
     name: product.name,
     description: null,
-    category_id: null,
+    category_id: product.categoryId,
+    category_name: product.categoryName,
+    external_category_id: product.externalCategoryId,
+    parent_external_product_id: product.parentExternalProductId,
+    parent_product_name: product.parentProductName,
+    variant_external_id: product.variantExternalId,
+    variant_name: product.variantName,
     price_cents: product.priceCents,
     cup_ml: product.cupMl,
-    brand: product.name,
-    variant: product.name,
+    brand: product.parentProductName ?? product.name,
+    variant: product.variantName
+      ? `${product.variantName} · parent: ${product.parentProductName ?? product.name}`
+      : product.name,
     cupMl: product.cupMl ?? 0,
     raw: null,
   };
@@ -88,12 +119,12 @@ export function KegBoard() {
 
       setBarrels([]);
       setTemplates([]);
-      setProducts((data.snapshot?.products ?? []).map(productFromOperational));
+      setProducts((data.snapshot?.mappingProducts ?? []).map(productFromOperational));
       console.info("Create Keg product selector diagnostics.", {
         mode: nextMode,
         merchantId: data.snapshot?.context.merchantId,
         posProvider: data.snapshot?.context.posProvider,
-        productsReturnedToSelector: data.snapshot?.products.length ?? 0,
+        productsReturnedToSelector: data.snapshot?.mappingProducts.length ?? 0,
       });
     }
 

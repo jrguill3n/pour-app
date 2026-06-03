@@ -26,6 +26,9 @@ const deleted = db.transaction(() => {
     employees: db
       .prepare("delete from employees where merchant_id = ? or pos_provider = ?")
       .run(demoMerchantId, demoProvider).changes,
+    productCategories: db
+      .prepare("delete from pos_product_categories where merchant_id = ? or pos_provider = ?")
+      .run(demoMerchantId, demoProvider).changes,
     products: db
       .prepare("delete from products where merchant_id = ? or pos_provider = ?")
       .run(demoMerchantId, demoProvider).changes,

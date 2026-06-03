@@ -55,4 +55,12 @@ double-count transactions.
 
 Product-to-barrel mappings persist to `barrels.external_product_ids`.
 Cup size mappings persist to `products.cup_ml`.
+Draft category eligibility persists to `pos_product_categories.is_draft_eligible`.
 Sync status persists to `polling_logs.last_synced_at` and `polling_logs.raw`.
+
+## Draft Category Filtering
+
+Pour syncs and stores every POS product for data completeness. Merchant-level
+draft category settings only filter product candidates in barrel mapping and
+Create Keg. If no eligible categories are selected, Pour shows all products and
+warns the user to configure draft categories.

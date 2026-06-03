@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AlertCircle, Check, Link, RefreshCcw, Save, Unplug } from "lucide-react";
+import { AlertCircle, Check, Filter, Link, RefreshCcw, Save, Unplug } from "lucide-react";
 import type { Barrel, Product } from "@/lib/core/types";
 
 interface OperationalAccount {
@@ -17,8 +17,22 @@ interface OperationalProduct {
   id: string;
   externalProductId: string;
   name: string;
+  categoryId: string | null;
+  categoryName: string | null;
+  externalCategoryId: string | null;
+  parentExternalProductId: string | null;
+  parentProductName: string | null;
+  variantExternalId: string | null;
+  variantName: string | null;
   cupMl: number | null;
   priceCents: number | null;
+}
+
+interface OperationalProductCategory {
+  id: string;
+  externalCategoryId: string;
+  name: string;
+  isDraftEligible: boolean;
 }
 
 interface OperationalBarrel {
@@ -56,6 +70,9 @@ interface OperationalSnapshot {
   mode: "demo" | "connected";
   accounts: OperationalAccount[];
   products: OperationalProduct[];
+  mappingProducts: OperationalProduct[];
+  productCategories: OperationalProductCategory[];
+  draftCategoriesConfigured: boolean;
   barrels: OperationalBarrel[];
   logs: OperationalPollingLog[];
 }
@@ -101,13 +118,22 @@ function rawSummary(raw: unknown) {
 }
 
 function productName(products: Array<Product | OperationalProduct>, externalProductId: string) {
-  return (
-    products.find((product) =>
-      "external_product_id" in product
-        ? product.external_product_id === externalProductId
-        : product.externalProductId === externalProductId
-    )?.name ?? externalProductId
+  const product = products.find((item) =>
+    "external_product_id" in item
+      ? item.external_product_id === externalProductId
+      : item.externalProductId === externalProductId
   );
+
+  if (!product) return externalProductId;
+  if ("variantName" in product && product.variantName) return product.variantName;
+  if ("variant_name" in product && product.variant_name) return product.variant_name;
+  return product.name;
+}
+
+function productDisplayName(product: OperationalProduct) {
+  return product.variantName && product.parentProductName
+    ? `${product.variantName} · parent: ${product.parentProductName}`
+    : product.name;
 }
 
 export function OperationsTab({
@@ -121,9 +147,11 @@ export function OperationsTab({
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [savingBarrelId, setSavingBarrelId] = useState<string | null>(null);
+  const [savingCategories, setSavingCategories] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [mappingDrafts, setMappingDrafts] = useState<Record<string, string[]>>({});
   const [cupDrafts, setCupDrafts] = useState<Record<string, string>>({});
+  const [eligibleCategoryDrafts, setEligibleCategoryDrafts] = useState<string[]>([]);
 
   const border = darkMode ? "#2a3050" : "#e5e7eb";
   const surface = darkMode ? "#151820" : "#fff";
@@ -151,6 +179,11 @@ export function OperationsTab({
         }
         return next;
       });
+      setEligibleCategoryDrafts(
+        data.snapshot.productCategories
+          .filter((category) => category.isDraftEligible)
+          .map((category) => category.externalCategoryId)
+      );
     }
     setLoading(false);
   }
@@ -176,8 +209,20 @@ export function OperationsTab({
           name: product.name,
           cupMl: product.cupMl,
           priceCents: product.price_cents ?? null,
+          categoryId: product.category_id ?? null,
+          categoryName: product.category_name ?? null,
+          externalCategoryId: product.external_category_id ?? product.category_id ?? null,
+          parentExternalProductId: product.parent_external_product_id ?? null,
+          parentProductName: product.parent_product_name ?? null,
+          variantExternalId: product.variant_external_id ?? null,
+          variantName: product.variant_name ?? null,
         }))
       : [];
+  const dbMappingProducts = snapshot?.mappingProducts ?? [];
+  const mappingProducts =
+    dbMappingProducts.length > 0
+      ? dbMappingProducts
+      : usableProducts;
   const dbBarrels = snapshot?.barrels ?? [];
   const usableBarrels =
     dbBarrels.length > 0
@@ -204,7 +249,8 @@ export function OperationsTab({
   const activeBarrels = usableBarrels.filter((barrel) => barrel.status === "active");
   const historyBarrels = usableBarrels.filter((barrel) => barrel.status === "closed");
   const unmappedActive = activeBarrels.filter((barrel) => barrel.externalProductIds.length === 0).length;
-  const productsMissingCup = usableProducts.filter((product) => !product.cupMl).length;
+  const productsMissingCup = mappingProducts.filter((product) => !product.cupMl).length;
+  const draftCategoriesConfigured = snapshot?.draftCategoriesConfigured ?? false;
 
   const onboarding = useMemo(
     () => [
@@ -240,6 +286,37 @@ export function OperationsTab({
       setMessage("Sync completado. Los barriles activos fueron recalculados.");
     }
     setSyncing(false);
+  }
+
+  async function saveEligibleCategories() {
+    setSavingCategories(true);
+    const response = await fetch("/api/ops/categories", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        merchant_id: snapshot?.context.merchantId,
+        pos_provider: snapshot?.context.posProvider,
+        eligible_external_category_ids: eligibleCategoryDrafts,
+      }),
+    });
+    const data = (await response.json()) as {
+      ok: boolean;
+      error?: string;
+      snapshot?: OperationalSnapshot;
+    };
+
+    if (!response.ok || !data.ok) {
+      setMessage(data.error ?? "No se pudieron guardar las categorias draft.");
+    } else {
+      setSnapshot(data.snapshot ?? null);
+      setEligibleCategoryDrafts(
+        data.snapshot?.productCategories
+          .filter((category) => category.isDraftEligible)
+          .map((category) => category.externalCategoryId) ?? []
+      );
+      setMessage("Categorias draft guardadas.");
+    }
+    setSavingCategories(false);
   }
 
   async function saveMapping(barrelId: string) {
@@ -294,6 +371,14 @@ export function OperationsTab({
           : [...current, externalProductId],
       };
     });
+  }
+
+  function toggleEligibleCategory(externalCategoryId: string) {
+    setEligibleCategoryDrafts((drafts) =>
+      drafts.includes(externalCategoryId)
+        ? drafts.filter((id) => id !== externalCategoryId)
+        : [...drafts, externalCategoryId]
+    );
   }
 
   return (
@@ -409,7 +494,7 @@ export function OperationsTab({
             </div>
           </div>
 
-          {(unmappedActive > 0 || productsMissingCup > 0 || !account?.connected) && (
+          {(unmappedActive > 0 || productsMissingCup > 0 || !account?.connected || !draftCategoriesConfigured) && (
             <div
               className="rounded-xl p-3 text-xs"
               style={{ background: darkMode ? "#1c2030" : "#fff7ed", border: "1px solid #fed7aa", color: "#c2410c" }}
@@ -417,8 +502,59 @@ export function OperationsTab({
               {unmappedActive > 0 && <div>{unmappedActive} barriles activos no tienen productos POS mapeados.</div>}
               {productsMissingCup > 0 && <div>{productsMissingCup} productos no tienen cup_ml configurado.</div>}
               {!account?.connected && snapshot?.mode !== "demo" && <div>POS desconectado: el sync manual esta deshabilitado.</div>}
+              {!draftCategoriesConfigured && (
+                <div>Configura categorias draft para limitar los candidatos de mapeo a productos de barril.</div>
+              )}
             </div>
           )}
+
+          <div className={cardBase} style={{ background: surface, border: `1.5px solid ${border}` }}>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className={smallLabel}>Draft product categories</div>
+                <div className="text-sm font-semibold mt-1" style={{ color: text }}>
+                  Categorias elegibles para barril
+                </div>
+                <div className="text-[11px] mt-1" style={{ color: muted }}>
+                  El sync conserva todos los productos; este filtro solo aplica a mapeo y Create Keg.
+                </div>
+              </div>
+              <button
+                onClick={() => void saveEligibleCategories()}
+                disabled={savingCategories || !snapshot?.productCategories.length}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold text-white disabled:opacity-60"
+                style={{ background: "#111827" }}
+              >
+                <Filter size={13} />
+                Guardar
+              </button>
+            </div>
+            {(snapshot?.productCategories ?? []).length === 0 ? (
+              <div className="text-xs mt-3" style={{ color: muted }}>
+                Sin categorias POS sincronizadas todavia.
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-1.5 mt-3">
+                {(snapshot?.productCategories ?? []).map((category) => {
+                  const selected = eligibleCategoryDrafts.includes(category.externalCategoryId);
+                  return (
+                    <button
+                      key={category.externalCategoryId}
+                      onClick={() => toggleEligibleCategory(category.externalCategoryId)}
+                      className="rounded-md px-2 py-1 text-[11px]"
+                      style={{
+                        background: selected ? "#111827" : darkMode ? "#0f1117" : "#f9fafb",
+                        border: `1px solid ${selected ? "#111827" : border}`,
+                        color: selected ? "#fff" : muted,
+                      }}
+                    >
+                      {category.name}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
 
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
             <div className="space-y-3">
@@ -466,7 +602,7 @@ export function OperationsTab({
                         </button>
                       </div>
                       <div className="flex flex-wrap gap-1.5 mt-3">
-                        {usableProducts.map((product) => {
+                        {mappingProducts.map((product) => {
                           const selected = draft.includes(product.externalProductId);
                           return (
                             <button
@@ -479,7 +615,7 @@ export function OperationsTab({
                                 color: selected ? "#fff" : muted,
                               }}
                             >
-                              {product.name}
+                              {productDisplayName(product)}
                             </button>
                           );
                         })}
