@@ -44,8 +44,31 @@ export interface ProductCategoryInput {
   variantExternalId?: string | null;
 }
 
+export interface ProductCupMlInput {
+  externalProductId: string;
+  cupMl?: number | null;
+}
+
 export function hasConfiguredDraftCategories(categories: CategoryEligibilityInput[]): boolean {
   return categories.some((category) => category.isDraftEligible);
+}
+
+export function isPositiveCupMl(value: number | null | undefined): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+export function findMappedProductsMissingCupMl(
+  externalProductIds: string[],
+  products: ProductCupMlInput[],
+  cupMlByExternalProductId: Record<string, number>
+): string[] {
+  const productCupMl = new Map(products.map((product) => [product.externalProductId, product.cupMl]));
+
+  return externalProductIds.filter((externalProductId) => {
+    const submittedCupMl = cupMlByExternalProductId[externalProductId];
+    const storedCupMl = productCupMl.get(externalProductId);
+    return !isPositiveCupMl(submittedCupMl) && !isPositiveCupMl(storedCupMl);
+  });
 }
 
 export function filterProductsByEligibleCategories<T extends ProductCategoryInput>(

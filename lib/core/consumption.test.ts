@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateBarrelConsumption } from "./consumption";
+import { calculateBarrelConsumption, formatLiters, getConsumedPct } from "./consumption";
 
 const barrels = [
   { id: "barrel-1", externalProductIds: ["poster-product-1", "poster-product-2"] },
@@ -52,6 +52,73 @@ describe("calculateBarrelConsumption", () => {
       revenue_descuentos_cents: 500,
       revenue_neto_cents: 4500,
     });
+  });
+
+  it("calculates consumption when cup_ml is configured", () => {
+    const totals = calculateBarrelConsumption(
+      [{ id: "barrel-1", externalProductIds: ["pinta-brown"] }],
+      [
+        {
+          id: "sale-1",
+          gross_cents: 24000,
+          discount_cents: 0,
+          net_cents: 24000,
+          line_items: [{ external_product_id: "pinta-brown", quantity: 3, gross_cents: 24000 }],
+        },
+      ],
+      { "pinta-brown": 355 }
+    );
+
+    expect(totals["barrel-1"]).toEqual({
+      ml_consumed: 1065,
+      revenue_bruto_cents: 24000,
+      revenue_descuentos_cents: 0,
+      revenue_neto_cents: 24000,
+    });
+  });
+
+  it("ignores mapped sales when cup_ml is missing", () => {
+    const totals = calculateBarrelConsumption(
+      [{ id: "barrel-1", externalProductIds: ["pinta-brown"] }],
+      [
+        {
+          id: "sale-1",
+          gross_cents: 8000,
+          discount_cents: 0,
+          net_cents: 8000,
+          line_items: [{ external_product_id: "pinta-brown", quantity: 1, gross_cents: 8000 }],
+        },
+      ],
+      {}
+    );
+
+    expect(totals["barrel-1"]).toEqual({
+      ml_consumed: 0,
+      revenue_bruto_cents: 0,
+      revenue_descuentos_cents: 0,
+      revenue_neto_cents: 0,
+    });
+  });
+
+  it("returns zero metrics when there are no sales", () => {
+    const totals = calculateBarrelConsumption(
+      [{ id: "barrel-1", externalProductIds: ["pinta-brown"] }],
+      [],
+      { "pinta-brown": 355 }
+    );
+
+    expect(totals["barrel-1"]).toEqual({
+      ml_consumed: 0,
+      revenue_bruto_cents: 0,
+      revenue_descuentos_cents: 0,
+      revenue_neto_cents: 0,
+    });
+  });
+
+  it("formats invalid or empty consumption values as safe zeroes", () => {
+    expect(getConsumedPct(Number.NaN, 20000)).toBe(0);
+    expect(formatLiters(Number.NaN)).toBe("0ml");
+    expect(formatLiters(0)).toBe("0ml");
   });
 
   it("ignores refunded and voided sales", () => {

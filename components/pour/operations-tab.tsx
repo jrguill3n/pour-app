@@ -327,6 +327,18 @@ export function OperationsTab({
         .map(([externalProductId, value]) => [externalProductId, Number(value)] as const)
         .filter(([, value]) => Number.isFinite(value) && value > 0)
     );
+    const missingCupMl = externalProductIds.filter((externalProductId) => {
+      const submittedCupMl = cup_ml_by_external_product_id[externalProductId];
+      const storedCupMl = usableProducts.find((product) => product.externalProductId === externalProductId)?.cupMl;
+      return !(Number.isFinite(submittedCupMl) && submittedCupMl > 0) &&
+        !(typeof storedCupMl === "number" && Number.isFinite(storedCupMl) && storedCupMl > 0);
+    });
+
+    if (missingCupMl.length > 0) {
+      setMessage("cup_ml es requerido para cada producto mapeado.");
+      setSavingBarrelId(null);
+      return;
+    }
 
     const response = await fetch("/api/ops/mappings", {
       method: "POST",

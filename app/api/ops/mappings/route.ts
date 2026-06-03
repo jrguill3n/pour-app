@@ -4,6 +4,7 @@ import {
   saveBarrelProductMapping,
   saveProductCupMlMapping,
 } from "@/lib/db/repositories/operations";
+import { findMappedProductsMissingCupMl } from "@/lib/db/repositories/operations-boundary";
 import type { POSProvider } from "@/lib/pos/types";
 
 interface MappingPayload {
@@ -27,10 +28,27 @@ export async function POST(request: NextRequest) {
     posProvider: body.pos_provider ?? snapshot.context.posProvider,
   };
   const externalProductIds = body.external_product_ids ?? [];
+  const cupMlByExternalProductId = body.cup_ml_by_external_product_id ?? {};
+  const missingCupMl = findMappedProductsMissingCupMl(
+    externalProductIds,
+    snapshot.products,
+    cupMlByExternalProductId
+  );
+
+  if (missingCupMl.length > 0) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "cup_ml is required for every mapped product.",
+        missing_external_product_ids: missingCupMl,
+      },
+      { status: 400 }
+    );
+  }
 
   await saveBarrelProductMapping(context, body.barrel_id, externalProductIds);
 
-  const cupMlEntries = Object.entries(body.cup_ml_by_external_product_id ?? {}).filter(
+  const cupMlEntries = Object.entries(cupMlByExternalProductId).filter(
     ([, value]) => Number.isFinite(value) && value > 0
   );
   await Promise.all(
