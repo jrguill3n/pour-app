@@ -1,4 +1,5 @@
 import { eq, and, sql, gte } from "drizzle-orm";
+import { defaultDraftCupMlForProduct } from "@/lib/core/serving-sizes";
 import { getDatabase } from "@/lib/db/client";
 import * as pg from "@/lib/db/schema/postgres";
 import * as sqlite from "@/lib/db/schema/sqlite";
@@ -35,6 +36,7 @@ export interface ActiveBarrelRecord {
 
 export interface StoredSaleForConsumption {
   id: string;
+  created_at: Date;
   gross_cents: number;
   discount_cents: number;
   net_cents: number;
@@ -66,6 +68,10 @@ function productCategoryName(product: NormalizedProduct): string | null {
     return typeof raw.category_name === "string" ? raw.category_name : null;
   }
   return null;
+}
+
+function productCupMl(product: NormalizedProduct): number | null {
+  return product.cup_ml ?? defaultDraftCupMlForProduct(product);
 }
 
 function saleCreatedAt(createdAt: string): Date {
@@ -100,7 +106,7 @@ export async function saveProducts(context: PersistenceContext, products: Normal
             variantExternalId: product.variant_external_id ?? null,
             variantName: product.variant_name ?? null,
             priceCents: product.price_cents ?? null,
-            cupMl: product.cup_ml ?? null,
+            cupMl: productCupMl(product),
             raw: product.raw ?? null,
             updatedAt: now,
           };
@@ -119,7 +125,7 @@ export async function saveProducts(context: PersistenceContext, products: Normal
           variantExternalId: sql`excluded.variant_external_id`,
           variantName: sql`excluded.variant_name`,
           priceCents: sql`excluded.price_cents`,
-          cupMl: sql`excluded.cup_ml`,
+          cupMl: sql`coalesce(${pg.products.cupMl}, excluded.cup_ml)`,
           raw: sql`excluded.raw`,
           updatedAt: now,
         },
@@ -148,7 +154,7 @@ export async function saveProducts(context: PersistenceContext, products: Normal
           variantExternalId: product.variant_external_id ?? null,
           variantName: product.variant_name ?? null,
           priceCents: product.price_cents ?? null,
-          cupMl: product.cup_ml ?? null,
+          cupMl: productCupMl(product),
           raw: product.raw ?? null,
           updatedAt: now,
         };
@@ -167,7 +173,7 @@ export async function saveProducts(context: PersistenceContext, products: Normal
         variantExternalId: sql`excluded.variant_external_id`,
         variantName: sql`excluded.variant_name`,
         priceCents: sql`excluded.price_cents`,
-        cupMl: sql`excluded.cup_ml`,
+        cupMl: sql`coalesce(${sqlite.products.cupMl}, excluded.cup_ml)`,
         raw: sql`excluded.raw`,
         updatedAt: now,
       },
@@ -588,6 +594,7 @@ export async function getSalesForConsumption(
 
     return rows.map((row) => ({
       id: row.id,
+      created_at: row.createdAt,
       gross_cents: row.grossCents,
       discount_cents: row.discountCents,
       net_cents: row.netCents,
@@ -610,6 +617,7 @@ export async function getSalesForConsumption(
 
   return rows.map((row) => ({
     id: row.id,
+    created_at: row.createdAt,
     gross_cents: row.grossCents,
     discount_cents: row.discountCents,
     net_cents: row.netCents,

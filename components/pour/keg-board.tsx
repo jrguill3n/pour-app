@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { getKegBoardInitialState } from "@/lib/repositories/mock-pour-repository";
+import { volumeMlToVolumeL } from "@/lib/db/repositories/operations-boundary";
 import type { Barrel, Line, Template, BarConfig, MenuConfig, Product } from "@/lib/core/types";
 import type { POSProvider } from "@/lib/pos/types";
 import { remPct, yPct, yColor } from "@/lib/pour-utils";
@@ -21,6 +22,13 @@ interface OperationalStatusResponse {
       merchantId: string;
       posProvider: string;
     };
+    lines: Array<{
+      id: string;
+      merchantId: string;
+      posProvider: string;
+      lineNumber: number;
+      note: string | null;
+    }>;
     products: Array<{
       id: string;
       merchantId: string;
@@ -53,6 +61,39 @@ interface OperationalStatusResponse {
       cupMl: number | null;
       priceCents: number | null;
     }>;
+    barrels: Array<{
+      id: string;
+      merchantId: string;
+      posProvider: string;
+      lineId: number;
+      kegId: string | null;
+      brand: string | null;
+      groupName: string | null;
+      beerStyle: string | null;
+      abvBasisPoints: number | null;
+      externalProductIds: string[];
+      volumeMl: number;
+      pricePaidCents: number | null;
+      mlConsumed: number;
+      mermaMl: number;
+      revenueBrutoCents: number;
+      revenueDescuentosCents: number;
+      revenueNetoCents: number;
+      status: string;
+      openedAt: string;
+      openedBy: string | null;
+      closedAt: string | null;
+      closedBy: string | null;
+    }>;
+  };
+}
+
+function lineFromOperational(
+  line: NonNullable<OperationalStatusResponse["snapshot"]>["lines"][number]
+): Line {
+  return {
+    id: line.lineNumber,
+    note: line.note ?? "",
   };
 }
 
@@ -85,11 +126,42 @@ function productFromOperational(
   };
 }
 
+function barrelFromOperational(
+  barrel: NonNullable<OperationalStatusResponse["snapshot"]>["barrels"][number],
+  index: number
+): Barrel {
+  return {
+    id: Number.isFinite(Number(barrel.id)) ? Number(barrel.id) : index + 1,
+    kegId: barrel.kegId ?? barrel.id,
+    location_id: null,
+    lineId: barrel.lineId,
+    brand: barrel.brand ?? barrel.groupName ?? "Barril",
+    group: barrel.groupName ?? barrel.brand ?? "Barril",
+    beerStyle: barrel.beerStyle ?? "",
+    abv: barrel.abvBasisPoints ? barrel.abvBasisPoints / 100 : null,
+    external_product_ids: barrel.externalProductIds,
+    pos_provider: barrel.posProvider as POSProvider,
+    volumeL: volumeMlToVolumeL(barrel.volumeMl),
+    pricePaid: (barrel.pricePaidCents ?? 0) / 100,
+    openedAt: barrel.openedAt,
+    openedBy: barrel.openedBy ?? "",
+    status: barrel.status === "closed" ? "closed" : "active",
+    mlConsumed: barrel.mlConsumed,
+    mermaMl: barrel.mermaMl,
+    closedAt: barrel.closedAt,
+    closedBy: barrel.closedBy,
+    revenueBrutoCents: barrel.revenueBrutoCents,
+    revenueDescuentosCents: barrel.revenueDescuentosCents,
+    revenueNetoCents: barrel.revenueNetoCents,
+  };
+}
+
 export function KegBoard() {
   const [tab, setTab] = useState<"dashboard" | "board" | "templates" | "history" | "operations" | "config" | "menu">("board");
   const [darkMode, setDarkMode] = useState(false);
   const [boardView, setBoardView] = useState<"grid" | "list">("grid");
   const [dataMode, setDataMode] = useState<"demo" | "connected" | null>(null);
+  const [operationalContext, setOperationalContext] = useState<NonNullable<OperationalStatusResponse["snapshot"]>["context"] | null>(null);
   const [products, setProducts] = useState(initialState.products);
   const [barrels, setBarrels] = useState<Barrel[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -110,20 +182,26 @@ export function KegBoard() {
       if (!active) return;
 
       setDataMode(nextMode);
+      setOperationalContext(data.snapshot?.context ?? null);
       if (nextMode === "demo") {
         setProducts(initialState.products);
         setBarrels(initialState.barrels);
         setTemplates(initialState.templates);
+        setLines(initialState.lines);
         return;
       }
 
-      setBarrels([]);
+      setLines((data.snapshot?.lines ?? []).map(lineFromOperational));
+      setBarrels((data.snapshot?.barrels ?? []).map(barrelFromOperational));
       setTemplates([]);
       setProducts((data.snapshot?.mappingProducts ?? []).map(productFromOperational));
       console.info("Create Keg product selector diagnostics.", {
         mode: nextMode,
         merchantId: data.snapshot?.context.merchantId,
         posProvider: data.snapshot?.context.posProvider,
+        linesReturnedToBoard: data.snapshot?.lines.length ?? 0,
+        barrelsReturnedToBoard: data.snapshot?.barrels.length ?? 0,
+        occupiedLines: (data.snapshot?.barrels ?? []).filter((barrel) => barrel.status === "active").map((barrel) => barrel.lineId),
         productsReturnedToSelector: data.snapshot?.mappingProducts.length ?? 0,
       });
     }
@@ -153,7 +231,7 @@ export function KegBoard() {
   }).length;
   const emptyCount = lines.length - activeCount;
 
-  function handleOpen(
+  async function handleOpen(
     lineId: number,
     data: {
       brand: string;
@@ -166,6 +244,38 @@ export function KegBoard() {
       openedBy: string;
     }
   ) {
+    if (dataMode === "connected" && operationalContext) {
+      const response = await fetch("/api/ops/barrels", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          merchant_id: operationalContext.merchantId,
+          pos_provider: operationalContext.posProvider,
+          line_id: lineId,
+          brand: data.brand,
+          group_name: data.group,
+          beer_style: data.beerStyle ?? null,
+          abv: data.abv ?? null,
+          external_product_ids: data.external_product_ids,
+          volume_l: data.volumeL,
+          price_paid: data.pricePaid,
+          opened_by: data.openedBy,
+        }),
+      });
+      const result = (await response.json()) as OperationalStatusResponse & { error?: string };
+
+      if (!response.ok || !result.ok) {
+        console.warn("Could not open local barrel.", { error: result.error, lineId });
+        return;
+      }
+
+      setLines((result.snapshot?.lines ?? []).map(lineFromOperational));
+      setBarrels((result.snapshot?.barrels ?? []).map(barrelFromOperational));
+      setProducts((result.snapshot?.mappingProducts ?? []).map(productFromOperational));
+      setOperationalContext(result.snapshot?.context ?? operationalContext);
+      return;
+    }
+
     const kegId = `KEG-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
     setBarrels((bs) => [
       ...bs,

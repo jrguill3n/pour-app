@@ -77,6 +77,69 @@ describe("calculateBarrelConsumption", () => {
     });
   });
 
+  it("does not count transactions before the barrel opened", () => {
+    const totals = calculateBarrelConsumption(
+      [{ id: "barrel-1", externalProductIds: ["pinta-lupulosa"], opened_at: "2026-06-03T02:01:18.000Z" }],
+      [
+        {
+          id: "old-sale",
+          created_at: "2026-05-27T23:48:25.000Z",
+          gross_cents: 12000,
+          discount_cents: 0,
+          net_cents: 12000,
+          line_items: [{ external_product_id: "pinta-lupulosa", quantity: 32, gross_cents: 384000 }],
+        },
+      ],
+      { "pinta-lupulosa": 355 }
+    );
+
+    expect(totals["barrel-1"].ml_consumed).toBe(0);
+    expect(totals["barrel-1"].revenue_bruto_cents).toBe(0);
+  });
+
+  it("counts transactions after the barrel opened", () => {
+    const totals = calculateBarrelConsumption(
+      [{ id: "barrel-1", externalProductIds: ["pinta-lupulosa"], opened_at: "2026-06-03T02:01:18.000Z" }],
+      [
+        {
+          id: "new-sale",
+          created_at: "2026-06-03T02:05:00.000Z",
+          gross_cents: 12000,
+          discount_cents: 0,
+          net_cents: 12000,
+          line_items: [{ external_product_id: "pinta-lupulosa", quantity: 1, gross_cents: 12000 }],
+        },
+      ],
+      { "pinta-lupulosa": 355 }
+    );
+
+    expect(totals["barrel-1"]).toEqual({
+      ml_consumed: 355,
+      revenue_bruto_cents: 12000,
+      revenue_descuentos_cents: 0,
+      revenue_neto_cents: 12000,
+    });
+  });
+
+  it("does not overcount timezone-offset sales before opened_at", () => {
+    const totals = calculateBarrelConsumption(
+      [{ id: "barrel-1", externalProductIds: ["pinta-lupulosa"], opened_at: "2026-06-03T02:01:18.000Z" }],
+      [
+        {
+          id: "edge-sale",
+          created_at: "2026-06-02T20:00:00-06:00",
+          gross_cents: 12000,
+          discount_cents: 0,
+          net_cents: 12000,
+          line_items: [{ external_product_id: "pinta-lupulosa", quantity: 1, gross_cents: 12000 }],
+        },
+      ],
+      { "pinta-lupulosa": 355 }
+    );
+
+    expect(totals["barrel-1"].ml_consumed).toBe(0);
+  });
+
   it("ignores mapped sales when cup_ml is missing", () => {
     const totals = calculateBarrelConsumption(
       [{ id: "barrel-1", externalProductIds: ["pinta-brown"] }],

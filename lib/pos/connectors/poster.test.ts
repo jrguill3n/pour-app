@@ -65,4 +65,17 @@ describe("Poster variant normalization", () => {
       gross_cents: 23000,
     });
   });
+
+  it("uses Poster date_close as the normalized sale timestamp", () => {
+    const sale = normalizePosterSale(
+      {
+        transaction_id: "sale-2",
+        date_close: "2026-05-27 23:48:25",
+        products: [],
+      },
+      "624548"
+    );
+
+    expect(sale.created_at).toBe("2026-05-28T05:48:25.000Z");
+  });
 });

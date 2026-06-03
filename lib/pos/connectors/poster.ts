@@ -102,7 +102,10 @@ interface PosterTransaction {
   transaction_id: string;
   spot_id?: string;
   employee_id?: string;
-  date_created: string;
+  date_created?: string;
+  date_close?: string;
+  date_start?: string;
+  created_at?: string;
   payed_sum?: string;
   sum?: string;
   discount?: string;
@@ -137,6 +140,69 @@ function requireAccessToken(context: POSConnectorContext): string {
   }
 
   return context.accessToken;
+}
+
+function timeZoneOffsetMs(timeZone: string, date: Date): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const value = (type: string) => Number(parts.find((part) => part.type === type)?.value ?? 0);
+  const zonedAsUtc = Date.UTC(
+    value("year"),
+    value("month") - 1,
+    value("day"),
+    value("hour"),
+    value("minute"),
+    value("second")
+  );
+
+  return zonedAsUtc - date.getTime();
+}
+
+function localPosterDateToIso(value: string, timeZone = process.env.POSTER_TIME_ZONE ?? "America/Mexico_City"): string {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})$/);
+  if (!match) {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
+  }
+
+  const [, year, month, day, hour, minute, second] = match;
+  const utcGuess = new Date(
+    Date.UTC(
+      Number(year),
+      Number(month) - 1,
+      Number(day),
+      Number(hour),
+      Number(minute),
+      Number(second)
+    )
+  );
+  const offset = timeZoneOffsetMs(timeZone, utcGuess);
+  return new Date(utcGuess.getTime() - offset).toISOString();
+}
+
+function posterTransactionCreatedAt(transaction: PosterTransaction): string {
+  const value =
+    transaction.date_close ??
+    transaction.date_created ??
+    transaction.date_start ??
+    transaction.created_at;
+
+  if (!value) return new Date().toISOString();
+
+  if (/^\d+$/.test(String(value))) {
+    const numeric = Number(value);
+    return new Date(numeric < 10_000_000_000 ? numeric * 1000 : numeric).toISOString();
+  }
+
+  return localPosterDateToIso(String(value));
 }
 
 function toCents(value?: string | number | null): number {
@@ -511,7 +577,7 @@ export function normalizePosterSale(
     merchant_id,
     location_id: transaction.spot_id || null,
     employee_id: transaction.employee_id || null,
-    created_at: transaction.date_created,
+    created_at: posterTransactionCreatedAt(transaction),
     gross_cents,
     discount_cents,
     net_cents: Math.max(0, gross_cents - discount_cents),

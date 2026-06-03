@@ -3,7 +3,7 @@ import { dirname } from "node:path";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { INITIAL_BARRELS, PRODUCTS } from "@/lib/pour-data";
-import { EMPLOYEES } from "@/lib/pour-data";
+import { EMPLOYEES, INITIAL_LINES } from "@/lib/pour-data";
 import * as schema from "@/lib/db/schema/sqlite";
 import type { NormalizedEmployee, NormalizedProduct } from "@/lib/pos/types";
 import { saveEmployees, saveProducts } from "@/lib/db/repositories/pos";
@@ -66,6 +66,21 @@ async function main() {
     { merchantId, posProvider: "mock" },
     [{ externalCategoryId: "mock-draft", name: "Demo Draft", isDraftEligible: true }]
   );
+
+  await seedDb
+    .insert(schema.lines)
+    .values(
+      INITIAL_LINES.map((line) => ({
+        id: `mock:${merchantId}:line:${line.id}`,
+        merchantId,
+        posProvider: "mock",
+        lineNumber: line.id,
+        note: line.note,
+        raw: { mode: "demo" },
+        updatedAt: now,
+      }))
+    )
+    .onConflictDoNothing();
 
   await seedDb
     .insert(schema.barrels)
