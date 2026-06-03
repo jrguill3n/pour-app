@@ -130,14 +130,47 @@ export function DetailPanel({
 
   const isEmpty = !barrel;
   const totalMl = barrel ? barrel.volumeL * 1000 : 0;
-  const rPct = barrel ? remPct(barrel.mlConsumed, totalMl) : 0;
-  const consumed = barrel ? parseFloat(yPct(barrel.mlConsumed, totalMl)) : 0;
+  const consumedMl = barrel && Number.isFinite(barrel.mlConsumed) ? barrel.mlConsumed : 0;
+  const remainingMl = Math.max(0, totalMl - consumedMl);
+  const rPct = barrel ? remPct(consumedMl, totalMl) : 0;
+  const consumed = barrel ? parseFloat(yPct(consumedMl, totalMl)) : 0;
+  const consumedLabel = fmtL(consumedMl);
+  const remainingLabel = fmtL(remainingMl);
   const color = barrel ? yColor(consumed) : "#9ca3af";
   const isLow = barrel && rPct < 20;
   const isAlmostEmpty = barrel && rPct < 8;
   const barrelProducts = barrel
     ? products.filter((p) => barrel.external_product_ids.includes(p.external_product_id))
     : [];
+  const totalLinkedCupMl = barrelProducts.reduce(
+    (sum, product) => sum + (Number.isFinite(product.cupMl) && product.cupMl > 0 ? product.cupMl : 0),
+    0
+  );
+  const barrelProductSalesRows = barrelProducts.map((product) => {
+    const cupMl = Number.isFinite(product.cupMl) && product.cupMl > 0 ? product.cupMl : 0;
+    const share = totalLinkedCupMl > 0 && cupMl > 0 ? cupMl / totalLinkedCupMl : 0;
+    const unitsSold = cupMl > 0 ? Math.round((consumedMl * share) / cupMl) : 0;
+
+    return {
+      product,
+      cupMl,
+      unitsSold,
+      mlFromProduct: unitsSold * cupMl,
+    };
+  });
+  const totalUnitsSold = barrelProductSalesRows.reduce((sum, row) => sum + row.unitsSold, 0);
+  const linkedProductPrices = barrelProducts
+    .map((product) => product.price_cents)
+    .filter((priceCents): priceCents is number => typeof priceCents === "number" && Number.isFinite(priceCents) && priceCents > 0)
+    .map((priceCents) => priceCents / 100);
+  const averageLinkedUnitPrice =
+    linkedProductPrices.length > 0
+      ? linkedProductPrices.reduce((sum, price) => sum + price, 0) / linkedProductPrices.length
+      : 0;
+  const breakEvenUnits =
+    barrel && barrel.pricePaid > 0 && averageLinkedUnitPrice > 0
+      ? Math.ceil(barrel.pricePaid / averageLinkedUnitPrice)
+      : null;
   const getProds = (ids: string[]) => products.filter((p) => ids.includes(p.external_product_id));
   const selectedProducts = getProds(form.external_product_ids);
   const selectedProductsHaveCupMl = selectedProducts.every((p) => Number.isFinite(p.cupMl) && p.cupMl > 0);
@@ -1041,7 +1074,7 @@ export function DetailPanel({
                     className="font-mono text-[17px] font-bold"
                     style={{ color: darkMode ? "#e2e8f0" : "#111827" }}
                   >
-                    {fmtL(totalMl - barrel.mlConsumed)}
+                    {remainingLabel}
                   </div>
                 </div>
                 <div>
@@ -1102,16 +1135,8 @@ export function DetailPanel({
                 border: `1px solid ${darkMode ? "#2a3050" : "#f3f4f6"}`,
               }}
             >
-              {barrelProducts.map((p, i) => {
-                const totalMlWeight = barrelProducts.reduce(
-                  (s, bp) => s + (Number.isFinite(bp.cupMl) && bp.cupMl > 0 ? bp.cupMl : 0),
-                  0
-                );
-                const cupMl = Number.isFinite(p.cupMl) && p.cupMl > 0 ? p.cupMl : 0;
-                const share = totalMlWeight > 0 && cupMl > 0 ? cupMl / totalMlWeight : 0;
-                const unitsSold = cupMl > 0 ? Math.round((barrel.mlConsumed * share) / cupMl) : 0;
-                const mlFromProduct = unitsSold * cupMl;
-                const isLast = i === barrelProducts.length - 1;
+              {barrelProductSalesRows.map(({ product: p, cupMl, unitsSold, mlFromProduct }, i) => {
+                const isLast = i === barrelProductSalesRows.length - 1;
                 return (
                   <div
                     key={p.id}
@@ -1167,7 +1192,7 @@ export function DetailPanel({
                   className="font-mono text-sm font-bold"
                   style={{ color: darkMode ? "#e2e8f0" : "#111827" }}
                 >
-                  {fmtL(barrel.mlConsumed)}
+                  {consumedLabel}
                 </span>
               </div>
             </div>
@@ -1180,8 +1205,8 @@ export function DetailPanel({
           >
             {[
               ["Abierto por", barrel.openedBy],
-              ["Precio pagado", `$${barrel.pricePaid.toLocaleString()}`],
-              ["Volumen", `${barrel.volumeL}L`],
+              ["Costo barril", `$${barrel.pricePaid.toLocaleString()}`],
+              ["Volumen inicial", `${barrel.volumeL}L`],
             ].map(([l, v]) => (
               <div key={l} className="flex justify-between mb-1">
                 <span
@@ -1238,7 +1263,7 @@ export function DetailPanel({
           </div>
 
           {/* Revenue section */}
-          {barrel.revenueBrutoCents && barrel.revenueBrutoCents > 0 && (
+          {(barrel.revenueBrutoCents ?? 0) > 0 && (
             <div
               className="rounded-lg py-2.5 px-3 mb-3"
               style={{
@@ -1250,11 +1275,13 @@ export function DetailPanel({
                 Revenue del barril
               </div>
               {(() => {
-                const bruto = barrel.revenueBrutoCents / 100;
+                const bruto = (barrel.revenueBrutoCents ?? 0) / 100;
                 const desc = (barrel.revenueDescuentosCents || 0) / 100;
                 const neto = (barrel.revenueNetoCents || 0) / 100;
+                const costRecoveryPct =
+                  barrel.pricePaid > 0 ? ((neto / barrel.pricePaid) * 100).toFixed(1) : null;
                 const margen =
-                  barrel.pricePaid > 0
+                  barrel.pricePaid > 0 && neto >= barrel.pricePaid
                     ? (((neto - barrel.pricePaid) / neto) * 100).toFixed(1)
                     : null;
                 const revPerL =
@@ -1267,6 +1294,12 @@ export function DetailPanel({
                     ? ([["Descuentos", `-$${desc.toLocaleString()}`, "#dc2626"]] as [string, string, string?][])
                     : []),
                   ["Neto", `$${neto.toLocaleString()}`],
+                  ["Costo barril", `$${barrel.pricePaid.toLocaleString()}`],
+                  ...(costRecoveryPct
+                    ? ([["Recuperación costo", `${costRecoveryPct}%`]] as [string, string, string?][])
+                    : []),
+                  ["Unidades vendidas", totalUnitsSold.toLocaleString()],
+                  ["Unidades equilibrio", breakEvenUnits ? breakEvenUnits.toLocaleString() : "—"],
                   ...(margen
                     ? ([["Margen bruto", `${margen}%`, "#16a34a"]] as [string, string, string?][])
                     : []),

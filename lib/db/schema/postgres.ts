@@ -105,6 +105,26 @@ export const posProductCategories = pgTable(
   ]
 );
 
+export const lines = pgTable(
+  "lines",
+  {
+    id: text("id").primaryKey(),
+    merchantId: text("merchant_id").notNull(),
+    posProvider: text("pos_provider").notNull(),
+    lineNumber: integer("line_number").notNull(),
+    note: text("note"),
+    raw: jsonb("raw"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("lines_merchant_pos_line_number_key").on(
+      table.merchantId,
+      table.posProvider,
+      table.lineNumber
+    ),
+  ]
+);
+
 export const employees = pgTable(
   "employees",
   {

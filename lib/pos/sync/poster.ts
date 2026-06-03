@@ -1,5 +1,5 @@
 import { getAccountByProvider, getFirstAccountByProvider } from "@/lib/db/repositories/accounts";
-import { calculateBarrelConsumption } from "@/lib/core/consumption";
+import { calculateBarrelConsumption, calculateBarrelConsumptionDiagnostics } from "@/lib/core/consumption";
 import {
   getActiveBarrels,
   getCupMlByExternalProductId,
@@ -118,10 +118,28 @@ export async function syncPosterTransactions(input: PosterSyncInput = {}): Promi
       activeBarrels.map((barrel) => ({
         id: barrel.id,
         externalProductIds: barrel.externalProductIds,
+        opened_at: barrel.openedAt,
       })),
       storedSales,
       cupMlByExternalProductId
     );
+    console.info("Barrel consumption diagnostics.", {
+      merchantId: account.merchantId,
+      diagnostics: calculateBarrelConsumptionDiagnostics(
+        activeBarrels.map((barrel) => ({
+          id: barrel.id,
+          externalProductIds: barrel.externalProductIds,
+          opened_at: barrel.openedAt,
+        })),
+        storedSales
+      ).map((diagnostic) => {
+        const barrel = activeBarrels.find((item) => item.id === diagnostic.barrel_id);
+        return {
+          ...diagnostic,
+          volume_ml: barrel?.volumeMl ?? null,
+        };
+      }),
+    });
     await updateBarrelConsumption(account.merchantId, totalsByBarrelId);
   }
 

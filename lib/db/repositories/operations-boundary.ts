@@ -49,6 +49,53 @@ export interface ProductCupMlInput {
   cupMl?: number | null;
 }
 
+export interface OperationalLineInput {
+  lineNumber: number;
+  note?: string | null;
+}
+
+export interface OperationalBarrelLineInput {
+  lineId: number;
+  status: string;
+}
+
+export function defaultOperationalLines(count = 15): OperationalLineInput[] {
+  return Array.from({ length: count }, (_, index) => {
+    const lineNumber = index + 1;
+    return {
+      lineNumber,
+      note: lineNumber === 15 ? "Nitro" : "",
+    };
+  });
+}
+
+export function occupiedLineNumbers(barrels: OperationalBarrelLineInput[]): number[] {
+  return [
+    ...new Set(
+      barrels
+        .filter((barrel) => barrel.status === "active")
+        .map((barrel) => barrel.lineId)
+    ),
+  ].sort((a, b) => a - b);
+}
+
+export function canOpenLine(
+  lineNumber: number,
+  lines: OperationalLineInput[],
+  barrels: OperationalBarrelLineInput[]
+): boolean {
+  return lines.some((line) => line.lineNumber === lineNumber) &&
+    !occupiedLineNumbers(barrels).includes(lineNumber);
+}
+
+export function volumeLToVolumeMl(volumeL: number): number {
+  return Number.isFinite(volumeL) && volumeL > 0 ? Math.round(volumeL * 1000) : 0;
+}
+
+export function volumeMlToVolumeL(volumeMl: number): number {
+  return Number.isFinite(volumeMl) && volumeMl > 0 ? volumeMl / 1000 : 0;
+}
+
 export function hasConfiguredDraftCategories(categories: CategoryEligibilityInput[]): boolean {
   return categories.some((category) => category.isDraftEligible);
 }

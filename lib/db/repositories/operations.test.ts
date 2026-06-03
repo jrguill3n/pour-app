@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
+  canOpenLine,
   chooseContext,
   DEMO_CONTEXT,
+  defaultOperationalLines,
   filterProductsByEligibleCategories,
   findMappedProductsMissingCupMl,
   hasConfiguredDraftCategories,
   hasRealConnectedAccount,
+  occupiedLineNumbers,
+  volumeLToVolumeMl,
+  volumeMlToVolumeL,
 } from "./operations-boundary";
 
 describe("operational demo/real boundary", () => {
@@ -97,5 +102,35 @@ describe("operational demo/real boundary", () => {
         {}
       )
     ).toEqual(["pinta-brown", "pinta-tiny"]);
+  });
+
+  it("creates a default local line setup for real merchants without demo data", () => {
+    const lines = defaultOperationalLines();
+
+    expect(lines).toHaveLength(15);
+    expect(lines[0]).toEqual({ lineNumber: 1, note: "" });
+    expect(lines[14]).toEqual({ lineNumber: 15, note: "Nitro" });
+  });
+
+  it("allows opening a real merchant line when no barrels exist", () => {
+    const lines = defaultOperationalLines();
+    const barrels: Array<{ lineId: number; status: string }> = [];
+
+    expect(occupiedLineNumbers(barrels)).toEqual([]);
+    expect(canOpenLine(1, lines, barrels)).toBe(true);
+  });
+
+  it("blocks opening an already occupied line but leaves empty lines available", () => {
+    const lines = defaultOperationalLines();
+    const barrels = [{ lineId: 1, status: "active" }];
+
+    expect(occupiedLineNumbers(barrels)).toEqual([1]);
+    expect(canOpenLine(1, lines, barrels)).toBe(false);
+    expect(canOpenLine(2, lines, barrels)).toBe(true);
+  });
+
+  it("round-trips a 20L barrel as 20000ml for persistence and rendering", () => {
+    expect(volumeLToVolumeMl(20)).toBe(20000);
+    expect(volumeMlToVolumeL(20000)).toBe(20);
   });
 });

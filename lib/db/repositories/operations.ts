@@ -6,9 +6,11 @@ import type { POSProvider } from "@/lib/pos/types";
 import {
   chooseContext,
   DEMO_CONTEXT,
+  defaultOperationalLines,
   filterProductsByEligibleCategories,
   hasRealConnectedAccount,
   hasConfiguredDraftCategories,
+  volumeLToVolumeMl,
 } from "./operations-boundary";
 
 export { chooseContext, DEMO_CONTEXT, filterProductsByEligibleCategories, hasRealConnectedAccount };
@@ -54,6 +56,14 @@ export interface OperationalProductCategory {
   isDraftEligible: boolean;
 }
 
+export interface OperationalLine {
+  id: string;
+  merchantId: string;
+  posProvider: string;
+  lineNumber: number;
+  note: string | null;
+}
+
 export interface OperationalBarrel {
   id: string;
   merchantId: string;
@@ -62,6 +72,8 @@ export interface OperationalBarrel {
   kegId: string | null;
   brand: string | null;
   groupName: string | null;
+  beerStyle: string | null;
+  abvBasisPoints: number | null;
   externalProductIds: string[];
   volumeMl: number;
   pricePaidCents: number | null;
@@ -73,7 +85,9 @@ export interface OperationalBarrel {
   revenueNetoCents: number;
   status: string;
   openedAt: string;
+  openedBy: string | null;
   closedAt: string | null;
+  closedBy: string | null;
 }
 
 export interface OperationalPollingLog {
@@ -95,6 +109,7 @@ export interface OperationalSnapshot {
   mappingProducts: OperationalProduct[];
   productCategories: OperationalProductCategory[];
   draftCategoriesConfigured: boolean;
+  lines: OperationalLine[];
   barrels: OperationalBarrel[];
   logs: OperationalPollingLog[];
 }
@@ -116,6 +131,53 @@ function countValue(row: { count: unknown } | undefined): number {
 
 function categoryEntityId(posProvider: string, merchantId: string, externalCategoryId: string): string {
   return `${posProvider}:${merchantId}:category:${externalCategoryId}`;
+}
+
+function lineEntityId(context: OperationalContext, lineNumber: number): string {
+  return `${context.posProvider}:${context.merchantId}:line:${lineNumber}`;
+}
+
+function barrelEntityId(context: OperationalContext, lineId: number, openedAt: Date): string {
+  return `${context.posProvider}:${context.merchantId}:barrel:${lineId}:${openedAt.getTime()}`;
+}
+
+async function ensureDefaultLines(context: OperationalContext) {
+  const runtime = getDatabase();
+  const now = new Date();
+  const lines = defaultOperationalLines();
+
+  if (runtime.dialect === "postgres") {
+    await runtime.db
+      .insert(pg.lines)
+      .values(
+        lines.map((line) => ({
+          id: lineEntityId(context, line.lineNumber),
+          merchantId: context.merchantId,
+          posProvider: context.posProvider,
+          lineNumber: line.lineNumber,
+          note: line.note,
+          raw: { source: "local-default" },
+          updatedAt: now,
+        }))
+      )
+      .onConflictDoNothing();
+    return;
+  }
+
+  await runtime.db
+    .insert(sqlite.lines)
+    .values(
+      lines.map((line) => ({
+        id: lineEntityId(context, line.lineNumber),
+        merchantId: context.merchantId,
+        posProvider: context.posProvider,
+        lineNumber: line.lineNumber,
+        note: line.note,
+        raw: { source: "local-default" },
+        updatedAt: now,
+      }))
+    )
+    .onConflictDoNothing();
 }
 
 function rawValue(raw: unknown, key: string): string | null {
@@ -196,7 +258,8 @@ export async function getOperationalSnapshot(
   if (runtime.dialect === "postgres") {
     const accountRows = await runtime.db.select().from(pg.accounts);
     const context = chooseContext(accountRows, preferredProvider);
-    const [productRows, categoryRows, barrelRows, logRows] = await Promise.all([
+    await ensureDefaultLines(context);
+    const [productRows, categoryRows, lineRows, barrelRows, logRows] = await Promise.all([
       runtime.db
         .select()
         .from(pg.products)
@@ -211,6 +274,11 @@ export async function getOperationalSnapshot(
           )
         )
         .orderBy(pg.posProductCategories.name),
+      runtime.db
+        .select()
+        .from(pg.lines)
+        .where(and(eq(pg.lines.merchantId, context.merchantId), eq(pg.lines.posProvider, context.posProvider)))
+        .orderBy(pg.lines.lineNumber),
       runtime.db
         .select()
         .from(pg.barrels)
@@ -273,6 +341,13 @@ export async function getOperationalSnapshot(
       mappingProducts,
       productCategories,
       draftCategoriesConfigured,
+      lines: lineRows.map((row) => ({
+        id: row.id,
+        merchantId: row.merchantId,
+        posProvider: row.posProvider,
+        lineNumber: row.lineNumber,
+        note: row.note,
+      })),
       barrels: barrelRows.map((row) => ({
         id: row.id,
         merchantId: row.merchantId,
@@ -281,6 +356,8 @@ export async function getOperationalSnapshot(
         kegId: row.kegId,
         brand: row.brand,
         groupName: row.groupName,
+        beerStyle: row.beerStyle,
+        abvBasisPoints: row.abv,
         externalProductIds: productIds(row.externalProductIds),
         volumeMl: row.volumeMl,
         pricePaidCents: row.pricePaidCents,
@@ -292,7 +369,9 @@ export async function getOperationalSnapshot(
         revenueNetoCents: row.revenueNetoCents,
         status: row.status,
         openedAt: toIso(row.openedAt) ?? new Date().toISOString(),
+        openedBy: row.openedBy,
         closedAt: toIso(row.closedAt),
+        closedBy: row.closedBy,
       })),
       logs: logRows.map((row) => ({
         id: row.id,
@@ -309,7 +388,8 @@ export async function getOperationalSnapshot(
 
   const accountRows = await runtime.db.select().from(sqlite.accounts);
   const context = chooseContext(accountRows, preferredProvider);
-  const [productRows, categoryRows, barrelRows, logRows] = await Promise.all([
+  await ensureDefaultLines(context);
+  const [productRows, categoryRows, lineRows, barrelRows, logRows] = await Promise.all([
     runtime.db
       .select()
       .from(sqlite.products)
@@ -324,6 +404,11 @@ export async function getOperationalSnapshot(
         )
       )
       .orderBy(sqlite.posProductCategories.name),
+    runtime.db
+      .select()
+      .from(sqlite.lines)
+      .where(and(eq(sqlite.lines.merchantId, context.merchantId), eq(sqlite.lines.posProvider, context.posProvider)))
+      .orderBy(sqlite.lines.lineNumber),
     runtime.db
       .select()
       .from(sqlite.barrels)
@@ -386,6 +471,13 @@ export async function getOperationalSnapshot(
     mappingProducts,
     productCategories,
     draftCategoriesConfigured,
+    lines: lineRows.map((row) => ({
+      id: row.id,
+      merchantId: row.merchantId,
+      posProvider: row.posProvider,
+      lineNumber: row.lineNumber,
+      note: row.note,
+    })),
     barrels: barrelRows.map((row) => ({
       id: row.id,
       merchantId: row.merchantId,
@@ -394,6 +486,8 @@ export async function getOperationalSnapshot(
       kegId: row.kegId,
       brand: row.brand,
       groupName: row.groupName,
+      beerStyle: row.beerStyle,
+      abvBasisPoints: row.abv,
       externalProductIds: productIds(row.externalProductIds),
       volumeMl: row.volumeMl,
       pricePaidCents: row.pricePaidCents,
@@ -405,7 +499,9 @@ export async function getOperationalSnapshot(
       revenueNetoCents: row.revenueNetoCents,
       status: row.status,
       openedAt: toIso(row.openedAt) ?? new Date().toISOString(),
+      openedBy: row.openedBy,
       closedAt: toIso(row.closedAt),
+      closedBy: row.closedBy,
     })),
     logs: logRows.map((row) => ({
       id: row.id,
@@ -452,6 +548,96 @@ export async function saveBarrelProductMapping(
         eq(sqlite.barrels.posProvider, context.posProvider)
       )
     );
+}
+
+export interface CreateOperationalBarrelInput {
+  lineId: number;
+  brand: string;
+  groupName: string;
+  beerStyle?: string | null;
+  abv?: number | null;
+  externalProductIds: string[];
+  volumeL: number;
+  pricePaid: number;
+  openedBy?: string | null;
+}
+
+export async function createOperationalBarrel(
+  context: OperationalContext,
+  input: CreateOperationalBarrelInput
+): Promise<OperationalSnapshot> {
+  const runtime = getDatabase();
+  const openedAt = new Date();
+  const id = barrelEntityId(context, input.lineId, openedAt);
+  const kegId = `KEG-${openedAt.getFullYear()}-${String(openedAt.getTime()).slice(-6)}`;
+  const values = {
+    id,
+    merchantId: context.merchantId,
+    posProvider: context.posProvider,
+    lineId: input.lineId,
+    kegId,
+    brand: input.brand,
+    groupName: input.groupName,
+    beerStyle: input.beerStyle ?? null,
+    abv: input.abv ? Math.round(input.abv * 100) : null,
+    externalProductIds: input.externalProductIds,
+    volumeMl: volumeLToVolumeMl(input.volumeL),
+    pricePaidCents: Math.round(input.pricePaid * 100),
+    mlConsumed: 0,
+    mermaMl: 0,
+    revenueBrutoCents: 0,
+    revenueDescuentosCents: 0,
+    revenueNetoCents: 0,
+    status: "active",
+    openedAt,
+    openedBy: input.openedBy ?? null,
+    raw: { source: "pour-local", input },
+    updatedAt: openedAt,
+  };
+
+  await ensureDefaultLines(context);
+
+  if (runtime.dialect === "postgres") {
+    const existing = await runtime.db
+      .select({ id: pg.barrels.id })
+      .from(pg.barrels)
+      .where(
+        and(
+          eq(pg.barrels.merchantId, context.merchantId),
+          eq(pg.barrels.posProvider, context.posProvider),
+          eq(pg.barrels.lineId, input.lineId),
+          eq(pg.barrels.status, "active")
+        )
+      )
+      .limit(1);
+
+    if (existing.length > 0) {
+      throw new Error("line_already_occupied");
+    }
+
+    await runtime.db.insert(pg.barrels).values(values);
+    return getOperationalSnapshot(context.posProvider);
+  }
+
+  const existing = await runtime.db
+    .select({ id: sqlite.barrels.id })
+    .from(sqlite.barrels)
+    .where(
+      and(
+        eq(sqlite.barrels.merchantId, context.merchantId),
+        eq(sqlite.barrels.posProvider, context.posProvider),
+        eq(sqlite.barrels.lineId, input.lineId),
+        eq(sqlite.barrels.status, "active")
+      )
+    )
+    .limit(1);
+
+  if (existing.length > 0) {
+    throw new Error("line_already_occupied");
+  }
+
+  await runtime.db.insert(sqlite.barrels).values(values);
+  return getOperationalSnapshot(context.posProvider);
 }
 
 export async function saveProductCupMlMapping(
