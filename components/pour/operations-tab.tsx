@@ -182,8 +182,10 @@ export function OperationsTab({
   const text = darkMode ? "#e2e8f0" : "#111827";
   const muted = darkMode ? "#94a3b8" : "#6b7280";
 
-  async function loadStatus() {
-    setLoading(true);
+  async function loadStatus(showLoading = true) {
+    if (showLoading) {
+      setLoading(true);
+    }
     const response = await fetch("/api/ops/status", { cache: "no-store" });
     const data = (await response.json()) as { ok: boolean; snapshot?: OperationalSnapshot };
     if (data.snapshot) {
@@ -212,7 +214,9 @@ export function OperationsTab({
         setSyncIntervalDraft(String(syncedAccount.syncIntervalMinutes || 5));
       }
     }
-    setLoading(false);
+    if (showLoading) {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -285,28 +289,37 @@ export function OperationsTab({
   const timeline = syncTimeline(snapshot?.logs ?? [], 5);
 
   async function runSync() {
+    if (isSyncRunning) return;
+
     setSyncing(true);
     setMessage("Sync iniciado. Esta accion es idempotente.");
-    const response = await fetch("/api/ops/sync", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        provider: snapshot?.context.posProvider,
-        pos_account_id: account?.posAccountId,
-      }),
-    });
-    const data = (await response.json()) as {
-      ok: boolean;
-      error?: string;
-      snapshot?: OperationalSnapshot;
-    };
-    if (!response.ok || !data.ok) {
-      setMessage(data.error ?? "El sync fallo.");
-    } else {
-      setSnapshot(data.snapshot ?? null);
-      setMessage("Sync completado. Los barriles activos fueron recalculados.");
+    try {
+      const response = await fetch("/api/ops/sync", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          provider: snapshot?.context.posProvider,
+          pos_account_id: account?.posAccountId,
+        }),
+      });
+      const data = (await response.json()) as {
+        ok: boolean;
+        error?: string;
+        snapshot?: OperationalSnapshot;
+      };
+      if (!response.ok || !data.ok) {
+        setMessage(data.error ?? "El sync fallo.");
+      } else {
+        setSnapshot(data.snapshot ?? null);
+        setMessage("Sync completado. Los barriles activos fueron recalculados.");
+      }
+      await loadStatus(false);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "El sync fallo.");
+      await loadStatus(false).catch(() => undefined);
+    } finally {
+      setSyncing(false);
     }
-    setSyncing(false);
   }
 
   async function saveSyncSettings(nextEnabled = account?.autoSyncEnabled ?? true) {
@@ -465,15 +478,6 @@ export function OperationsTab({
               Conexion, sync, mapeos y estado operativo
             </div>
           </div>
-          <button
-            onClick={() => void runSync()}
-            disabled={isSyncRunning}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold text-white disabled:opacity-60"
-            style={{ background: "linear-gradient(135deg,#9f1239,#f43f5e)" }}
-          >
-            <RefreshCcw size={14} className={isSyncRunning ? "animate-spin" : ""} />
-            {isSyncRunning ? "Syncing..." : "Sync Now"}
-          </button>
         </div>
       </div>
 
@@ -554,6 +558,23 @@ export function OperationsTab({
                 <span className="text-xs font-semibold" style={{ color: healthColor(health) }}>
                   {healthLabel}
                 </span>
+              </div>
+              <div className="mt-3 flex items-center justify-between gap-2">
+                <div>
+                  <div className="text-[10px] text-muted-foreground">Manual sync</div>
+                  <div className="text-[11px]" style={{ color: muted }}>
+                    Uses the same sync engine as cron
+                  </div>
+                </div>
+                <button
+                  onClick={() => void runSync()}
+                  disabled={isSyncRunning || !account?.connected}
+                  className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-white disabled:opacity-60"
+                  style={{ background: "linear-gradient(135deg,#9f1239,#f43f5e)" }}
+                >
+                  <RefreshCcw size={13} className={isSyncRunning ? "animate-spin" : ""} />
+                  {isSyncRunning ? "Syncing..." : "Sync Now"}
+                </button>
               </div>
               <div className="grid grid-cols-2 gap-2 mt-3">
                 <div>
