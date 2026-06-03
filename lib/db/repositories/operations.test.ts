@@ -3,6 +3,7 @@ import {
   chooseContext,
   DEMO_CONTEXT,
   filterProductsByEligibleCategories,
+  findMappedProductsMissingCupMl,
   hasConfiguredDraftCategories,
   hasRealConnectedAccount,
 } from "./operations-boundary";
@@ -63,5 +64,38 @@ describe("operational demo/real boundary", () => {
         { externalCategoryId: "draft-national", isDraftEligible: true },
       ])
     ).toEqual([{ externalProductId: "pint", externalCategoryId: "draft-national" }]);
+  });
+
+  it("allows mapped products when cup_ml is already configured", () => {
+    expect(
+      findMappedProductsMissingCupMl(
+        ["pinta-brown"],
+        [{ externalProductId: "pinta-brown", cupMl: 355 }],
+        {}
+      )
+    ).toEqual([]);
+  });
+
+  it("allows mapped products when cup_ml is submitted with the mapping save", () => {
+    expect(
+      findMappedProductsMissingCupMl(
+        ["pinta-brown"],
+        [{ externalProductId: "pinta-brown", cupMl: null }],
+        { "pinta-brown": 355 }
+      )
+    ).toEqual([]);
+  });
+
+  it("rejects mapped products without cup_ml", () => {
+    expect(
+      findMappedProductsMissingCupMl(
+        ["pinta-brown", "pinta-tiny"],
+        [
+          { externalProductId: "pinta-brown", cupMl: 0 },
+          { externalProductId: "pinta-tiny", cupMl: null },
+        ],
+        {}
+      )
+    ).toEqual(["pinta-brown", "pinta-tiny"]);
   });
 });

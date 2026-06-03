@@ -138,6 +138,9 @@ export function DetailPanel({
   const barrelProducts = barrel
     ? products.filter((p) => barrel.external_product_ids.includes(p.external_product_id))
     : [];
+  const getProds = (ids: string[]) => products.filter((p) => ids.includes(p.external_product_id));
+  const selectedProducts = getProds(form.external_product_ids);
+  const selectedProductsHaveCupMl = selectedProducts.every((p) => Number.isFinite(p.cupMl) && p.cupMl > 0);
 
   function handleOpenFromTemplate() {
     if (!selectedTemplate) return;
@@ -193,10 +196,10 @@ export function DetailPanel({
     setScreen("view");
   }
 
-  const getProds = (ids: string[]) => products.filter((p) => ids.includes(p.external_product_id));
   const manualReady =
     form.group &&
     form.external_product_ids.length > 0 &&
+    selectedProductsHaveCupMl &&
     form.volumeL &&
     form.pricePaid;
 
@@ -1101,14 +1104,13 @@ export function DetailPanel({
             >
               {barrelProducts.map((p, i) => {
                 const totalMlWeight = barrelProducts.reduce(
-                  (s, bp) => s + bp.cupMl,
+                  (s, bp) => s + (Number.isFinite(bp.cupMl) && bp.cupMl > 0 ? bp.cupMl : 0),
                   0
                 );
-                const share = p.cupMl / totalMlWeight;
-                const unitsSold = Math.round(
-                  (barrel.mlConsumed * share) / p.cupMl
-                );
-                const mlFromProduct = unitsSold * p.cupMl;
+                const cupMl = Number.isFinite(p.cupMl) && p.cupMl > 0 ? p.cupMl : 0;
+                const share = totalMlWeight > 0 && cupMl > 0 ? cupMl / totalMlWeight : 0;
+                const unitsSold = cupMl > 0 ? Math.round((barrel.mlConsumed * share) / cupMl) : 0;
+                const mlFromProduct = unitsSold * cupMl;
                 const isLast = i === barrelProducts.length - 1;
                 return (
                   <div
@@ -1131,7 +1133,7 @@ export function DetailPanel({
                         className="text-[11px] mt-0.5"
                         style={{ color: darkMode ? "#475569" : "#9ca3af" }}
                       >
-                        {p.cupMl}ml por servicio
+                        {cupMl}ml por servicio
                       </div>
                     </div>
                     <div className="text-right shrink-0">

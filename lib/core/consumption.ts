@@ -3,11 +3,13 @@ export function getTotalMl(volumeL: number): number {
 }
 
 export function getRemainingPct(consumedMl: number, totalMl: number): number {
+  if (!Number.isFinite(consumedMl) || !Number.isFinite(totalMl)) return 0;
   if (totalMl <= 0) return 0;
   return Math.max(0, Math.min(100, 100 - (consumedMl / totalMl) * 100));
 }
 
 export function getConsumedPct(consumedMl: number, totalMl: number): number {
+  if (!Number.isFinite(consumedMl) || !Number.isFinite(totalMl)) return 0;
   if (totalMl <= 0) return 0;
   return Math.max(0, Math.min(100, (consumedMl / totalMl) * 100));
 }
@@ -22,6 +24,7 @@ export function getExcessMermaMl(mermaMl: number, volumeL: number, maxMermaPct: 
 }
 
 export function formatLiters(ml: number): string {
+  if (!Number.isFinite(ml) || ml <= 0) return "0ml";
   return ml >= 1000 ? `${(ml / 1000).toFixed(1)}L` : `${ml}ml`;
 }
 
