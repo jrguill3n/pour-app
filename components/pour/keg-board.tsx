@@ -11,6 +11,7 @@ import { LineCard } from "./line-card";
 import { DetailPanel } from "./detail-panel";
 import { DashboardTab } from "./dashboard-tab";
 import { OperationsTab } from "./operations-tab";
+import { DebugBadge } from "./debug-badge";
 
 const initialState = getKegBoardInitialState();
 
@@ -517,6 +518,8 @@ export function KegBoard() {
           </span>
         </div>
       </div>
+
+      <DebugBadge darkMode={darkMode} />
 
       {/* Content */}
       <div className="flex-1 overflow-hidden flex flex-col">
