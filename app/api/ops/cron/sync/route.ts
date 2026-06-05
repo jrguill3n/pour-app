@@ -1,17 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runDueAutoSync } from "@/lib/pos/sync/scheduler";
+import { isProtectedRouteAllowed } from "@/lib/security/admin";
 
 function isCronAllowed(request: NextRequest): boolean {
-  if (process.env.NODE_ENV !== "production") {
-    return true;
-  }
-
-  const expectedSecret = process.env.SYNC_CRON_SECRET;
-  const actualSecret =
-    request.headers.get("x-sync-cron-secret") ??
-    request.nextUrl.searchParams.get("secret");
-
-  return Boolean(expectedSecret && actualSecret && expectedSecret === actualSecret);
+  return isProtectedRouteAllowed(request, "cron");
 }
 
 async function handleCronSync(request: NextRequest) {

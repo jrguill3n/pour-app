@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Activity, AlertCircle, Check, Filter, Link, RefreshCcw, Save, Unplug } from "lucide-react";
 import type { Barrel, Product } from "@/lib/core/types";
+import { closedBarrelHistoryWarnings } from "@/lib/core/barrel-close";
 import {
   syncHealth,
   syncHealthLabel,
@@ -64,6 +65,7 @@ interface OperationalBarrel {
   status: string;
   openedAt: string;
   closedAt: string | null;
+  closedBy: string | null;
 }
 
 interface OperationalPollingLog {
@@ -275,6 +277,7 @@ export function OperationsTab({
           status: barrel.status,
           openedAt: barrel.openedAt,
           closedAt: barrel.closedAt,
+          closedBy: barrel.closedBy ?? null,
         }))
       : [];
   const activeBarrels = usableBarrels.filter((barrel) => barrel.status === "active");
@@ -885,6 +888,17 @@ export function OperationsTab({
                 {historyBarrels.map((barrel) => {
                   const yieldPct = barrel.volumeMl > 0 ? (barrel.mlConsumed / barrel.volumeMl) * 100 : 0;
                   const mermaPct = barrel.volumeMl > 0 ? (barrel.mermaMl / barrel.volumeMl) * 100 : 0;
+                  const historyWarnings = closedBarrelHistoryWarnings({
+                    status: barrel.status,
+                    volumeMl: barrel.volumeMl,
+                    mlConsumed: barrel.mlConsumed,
+                    mermaMl: barrel.mermaMl,
+                    closedAt: barrel.closedAt,
+                    closedBy: barrel.closedBy,
+                    grossRevenueCents: barrel.revenueBrutoCents,
+                    discountRevenueCents: barrel.revenueDescuentosCents,
+                    netRevenueCents: barrel.revenueNetoCents,
+                  });
                   return (
                     <div
                       key={barrel.id}
@@ -898,6 +912,11 @@ export function OperationsTab({
                         <div className="text-[10px] text-muted-foreground">
                           {fmtDate(barrel.openedAt)} - {fmtDate(barrel.closedAt)}
                         </div>
+                        {historyWarnings.length > 0 && (
+                          <div className="text-[10px] mt-1" style={{ color: "#d97706" }}>
+                            Revisar datos: {historyWarnings.join(" ")}
+                          </div>
+                        )}
                       </div>
                       <div className="text-[11px]">
                         <div className={smallLabel}>Litros</div>

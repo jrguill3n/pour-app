@@ -13,6 +13,7 @@ import {
   normalizeOperationalBarrelEdit,
   volumeLToVolumeMl,
 } from "./operations-boundary";
+import { validateBarrelClose } from "@/lib/core/barrel-close";
 
 export { chooseContext, DEMO_CONTEXT, filterProductsByEligibleCategories, hasRealConnectedAccount };
 
@@ -592,6 +593,12 @@ export interface UpdateOperationalBarrelInput {
   openedBy?: string | null;
 }
 
+export interface CloseOperationalBarrelInput {
+  mermaMl: number;
+  closedBy: string;
+  closedAt?: Date;
+}
+
 export async function createOperationalBarrel(
   context: OperationalContext,
   input: CreateOperationalBarrelInput
@@ -721,6 +728,99 @@ export async function updateOperationalBarrel(
         eq(sqlite.barrels.posProvider, context.posProvider)
       )
     );
+  return getOperationalSnapshot(context.posProvider);
+}
+
+export async function closeOperationalBarrel(
+  context: OperationalContext,
+  barrelId: string,
+  input: CloseOperationalBarrelInput
+): Promise<OperationalSnapshot> {
+  const runtime = getDatabase();
+  const closedAt = input.closedAt ?? new Date();
+
+  const currentRows = runtime.dialect === "postgres"
+    ? await runtime.db
+        .select()
+        .from(pg.barrels)
+        .where(
+          and(
+            eq(pg.barrels.id, barrelId),
+            eq(pg.barrels.merchantId, context.merchantId),
+            eq(pg.barrels.posProvider, context.posProvider)
+          )
+        )
+        .limit(1)
+    : await runtime.db
+        .select()
+        .from(sqlite.barrels)
+        .where(
+          and(
+            eq(sqlite.barrels.id, barrelId),
+            eq(sqlite.barrels.merchantId, context.merchantId),
+            eq(sqlite.barrels.posProvider, context.posProvider)
+          )
+        )
+        .limit(1);
+
+  const current = currentRows[0];
+  if (!current) throw new Error("barrel_not_found");
+
+  const validation = validateBarrelClose({
+    status: current.status,
+    volumeMl: current.volumeMl,
+    mlConsumed: current.mlConsumed,
+    mermaMl: input.mermaMl,
+    grossRevenueCents: current.revenueBrutoCents,
+    discountRevenueCents: current.revenueDescuentosCents,
+    netRevenueCents: current.revenueNetoCents,
+    openedAt: current.openedAt,
+    closedAt,
+    closedBy: input.closedBy,
+  });
+
+  if (!validation.ok || !validation.summary) {
+    throw new Error(`barrel_close_invalid:${validation.errors.join("|")}`);
+  }
+
+  const values = {
+    status: "closed",
+    mermaMl: validation.summary.mermaMl,
+    yieldPct: validation.summary.finalYieldPctBasisPoints,
+    closedAt,
+    closedBy: input.closedBy.trim(),
+    raw: {
+      source: "pour-local-close",
+      close_summary: validation.summary,
+    },
+    updatedAt: closedAt,
+  };
+
+  if (runtime.dialect === "postgres") {
+    await runtime.db
+      .update(pg.barrels)
+      .set(values)
+      .where(
+        and(
+          eq(pg.barrels.id, barrelId),
+          eq(pg.barrels.merchantId, context.merchantId),
+          eq(pg.barrels.posProvider, context.posProvider)
+        )
+      );
+    return getOperationalSnapshot(context.posProvider);
+  }
+
+  await runtime.db
+    .update(sqlite.barrels)
+    .set(values)
+    .where(
+      and(
+        eq(sqlite.barrels.id, barrelId),
+        eq(sqlite.barrels.merchantId, context.merchantId),
+        eq(sqlite.barrels.posProvider, context.posProvider)
+      )
+    );
+
   return getOperationalSnapshot(context.posProvider);
 }
 

@@ -48,7 +48,7 @@ interface DetailPanelProps {
       openedBy: string;
     }
   ) => void;
-  onClose: (barrelId: number, mermaMl: number, closedBy: string) => void;
+  onClose: (barrelId: number, mermaMl: number, closedBy: string) => void | Promise<boolean | void>;
   onEdit: (barrelId: number, fields: BarrelEditFields) => void | Promise<boolean | void>;
   onDeselect: () => void;
   onSaveTemplate: (
@@ -106,6 +106,7 @@ export function DetailPanel({
   const [templatePrice, setTemplatePrice] = useState("");
   const [templateSearch, setTemplateSearch] = useState("");
   const [mermaL, setMermaL] = useState("");
+  const [closeError, setCloseError] = useState<string | null>(null);
   const [saveAsTemplate, setSaveAsTemplate] = useState(false);
 
   const lineHistory = useMemo(
@@ -983,9 +984,15 @@ export function DetailPanel({
 
         <button
           onClick={() => {
-            onClose(barrel.id, mermaActualMl, currentEmployee);
-            setMermaL("");
-            setScreen("view");
+            void Promise.resolve(onClose(barrel.id, mermaActualMl, currentEmployee)).then((ok) => {
+              if (ok === false) {
+                setCloseError("No se pudo cerrar el barril. Revisa merma, ventas y datos de cierre.");
+                return;
+              }
+              setCloseError(null);
+              setMermaL("");
+              setScreen("view");
+            });
           }}
           className="w-full py-3 rounded-lg text-sm font-semibold"
           style={{
@@ -997,6 +1004,11 @@ export function DetailPanel({
         >
           Confirmar cierre · liberar línea {String(line.id).padStart(2, "0")}
         </button>
+        {closeError && (
+          <div className="mt-2 text-xs text-red-600">
+            {closeError}
+          </div>
+        )}
       </div>
     );
   }

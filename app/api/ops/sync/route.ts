@@ -7,6 +7,7 @@ import {
 import { updateAccountSyncStatus } from "@/lib/db/repositories/accounts";
 import { runManualPosSync } from "@/lib/pos/sync/manual";
 import { nextSyncAt } from "@/lib/pos/sync/scheduler-boundary";
+import { isProtectedRouteAllowed } from "@/lib/security/admin";
 import type { POSProvider } from "@/lib/pos/types";
 
 interface SyncPayload {
@@ -44,6 +45,10 @@ async function readPayload(request: NextRequest): Promise<SyncPayload> {
 }
 
 async function handleOpsSync(request: NextRequest) {
+  if (!isProtectedRouteAllowed(request, "ops")) {
+    return NextResponse.json({ ok: false, error: "Manual sync is not authorized." }, { status: 403 });
+  }
+
   const body = await readPayload(request);
   const snapshot = await getOperationalSnapshot(body?.provider);
   const connectedAccount = snapshot.accounts.find((item) => item.connected && item.posProvider !== "mock");

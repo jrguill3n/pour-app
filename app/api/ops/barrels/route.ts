@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
+  closeOperationalBarrel,
   createOperationalBarrel,
   getOperationalSnapshot,
   saveProductCupMlMapping,
@@ -23,6 +24,7 @@ interface CreateBarrelPayload {
 }
 
 interface UpdateBarrelPayload {
+  action?: "update" | "close";
   merchant_id?: string;
   pos_provider?: POSProvider;
   barrel_id?: string;
@@ -34,6 +36,8 @@ interface UpdateBarrelPayload {
   volume_l?: number | null;
   price_paid?: number | null;
   opened_by?: string | null;
+  closed_by?: string | null;
+  merma_ml?: number;
   cup_ml_by_external_product_id?: Record<string, number>;
 }
 
@@ -120,6 +124,38 @@ export async function PATCH(request: NextRequest) {
   const knownBarrel = snapshot.barrels.find((barrel) => barrel.id === body.barrel_id);
   if (!knownBarrel) {
     return NextResponse.json({ ok: false, error: "Barrel not found for this merchant." }, { status: 404 });
+  }
+
+  if (body.action === "close") {
+    if (typeof body.merma_ml !== "number" || !Number.isFinite(body.merma_ml) || body.merma_ml < 0) {
+      return NextResponse.json({ ok: false, error: "merma_ml is required and must be 0 or greater." }, { status: 400 });
+    }
+
+    if (!body.closed_by?.trim()) {
+      return NextResponse.json({ ok: false, error: "closed_by is required." }, { status: 400 });
+    }
+
+    try {
+      const nextSnapshot = await closeOperationalBarrel(context, body.barrel_id, {
+        mermaMl: body.merma_ml,
+        closedBy: body.closed_by,
+      });
+
+      return NextResponse.json({ ok: true, snapshot: nextSnapshot });
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith("barrel_close_invalid:")) {
+        return NextResponse.json(
+          { ok: false, error: "Barrel close validation failed.", details: error.message.replace("barrel_close_invalid:", "").split("|") },
+          { status: 400 }
+        );
+      }
+
+      if (error instanceof Error && error.message === "barrel_not_found") {
+        return NextResponse.json({ ok: false, error: "Barrel not found for this merchant." }, { status: 404 });
+      }
+
+      throw error;
+    }
   }
 
   const externalProductIds = body.external_product_ids ?? knownBarrel.externalProductIds;

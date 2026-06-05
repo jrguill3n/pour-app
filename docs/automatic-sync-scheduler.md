@@ -33,6 +33,8 @@ Local/dev requests do not require a cron secret. Connected accounts default to:
 
 The POS/Ops tab shows Auto-sync ON/OFF, interval, last sync, next sync, and the
 last result/error. Manual `Sync Now` continues to use `/api/ops/sync`.
+Manual sync, auto-sync, and the legacy development sync route all dispatch
+through the same shared manual sync engine.
 
 ## Production
 
@@ -46,6 +48,7 @@ In production, protect the endpoint with:
 
 ```bash
 SYNC_CRON_SECRET=replace-me
+POUR_ADMIN_SECRET=replace-me
 ```
 
 Send the secret either as a query param or header:
@@ -96,4 +99,6 @@ SQLITE_DATABASE_URL=file:./data/dev.db
 - The scheduler uses an in-process lock to prevent overlapping jobs in local/dev.
 - Normalized sales are idempotent through the existing unique transaction key.
 - Provider-specific sync is dispatched through the shared sync engine.
+- Development and admin routes require `POUR_ADMIN_SECRET`, `PILOT_ADMIN_SECRET`,
+  or the route-specific secret in production.
 - Poster remains read-only.
