@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { syncPosterManual } from "@/lib/pos/sync/poster";
+import { runManualPosSync } from "@/lib/pos/sync/manual";
 
 function isManualSyncAllowed(request: NextRequest): boolean {
   if (process.env.NODE_ENV !== "production") {
@@ -33,7 +33,7 @@ async function handleManualSync(request: NextRequest) {
   }
 
   try {
-    const result = await syncPosterManual({ posAccountId, from, to });
+    const result = await runManualPosSync({ provider: "poster", posAccountId, from, to });
     return NextResponse.json({ ok: true, result });
   } catch (error) {
     console.error("Poster manual sync failed:", error);

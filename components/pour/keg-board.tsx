@@ -210,12 +210,16 @@ export function KegBoard() {
       });
     }
 
-    void loadDataMode().catch(() => {
+    void loadDataMode().catch((error) => {
       if (!active) return;
-      setDataMode("demo");
-      setProducts(initialState.products);
-      setBarrels(initialState.barrels);
-      setTemplates(initialState.templates);
+      console.warn("Could not load operational status; refusing to show seeded demo data as a fallback.", {
+        message: error instanceof Error ? error.message : "Unknown status error",
+      });
+      setDataMode(null);
+      setProducts([]);
+      setBarrels([]);
+      setTemplates([]);
+      setLines([]);
     });
 
     return () => {
@@ -509,7 +513,7 @@ export function KegBoard() {
           className="text-[11px]"
           style={{ color: darkMode ? "#475569" : "#9ca3af" }}
         >
-          {dataMode === "connected" ? "POS conectado" : "Mock POS"} ·{" "}
+          {dataMode === "connected" ? "POS conectado" : dataMode === "demo" ? "Mock POS" : "POS sin estado"} ·{" "}
           <span
             className="font-medium"
             style={{ color: darkMode ? "#94a3b8" : "#374151" }}
