@@ -1,8 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { AlertCircle, Check, Filter, Link, RefreshCcw, Save, Unplug } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Activity, AlertCircle, Check, Filter, Link, RefreshCcw, Save, Unplug } from "lucide-react";
 import type { Barrel, Product } from "@/lib/core/types";
+import {
+  syncHealth,
+  syncHealthLabel,
+  syncModeLabel,
+  syncSummary,
+  syncTimeline,
+} from "@/lib/pos/sync/visualization";
 
 interface OperationalAccount {
   id: string;
@@ -10,6 +17,12 @@ interface OperationalAccount {
   posProvider: string;
   posAccountId: string;
   connected: boolean;
+  autoSyncEnabled: boolean;
+  syncIntervalMinutes: number;
+  lastSyncAt: string | null;
+  nextSyncAt: string | null;
+  lastSyncStatus: string | null;
+  lastSyncError: string | null;
   updatedAt: string;
 }
 
@@ -117,6 +130,14 @@ function rawSummary(raw: unknown) {
   return count === undefined ? status : `${status} · ${String(count)} procesados`;
 }
 
+function healthColor(status: ReturnType<typeof syncHealth>) {
+  if (status === "running") return "#2563eb";
+  if (status === "success") return "#16a34a";
+  if (status === "failed") return "#dc2626";
+  if (status === "skipped") return "#ca8a04";
+  return "#6b7280";
+}
+
 function productName(products: Array<Product | OperationalProduct>, externalProductId: string) {
   const product = products.find((item) =>
     "external_product_id" in item
@@ -148,10 +169,12 @@ export function OperationsTab({
   const [syncing, setSyncing] = useState(false);
   const [savingBarrelId, setSavingBarrelId] = useState<string | null>(null);
   const [savingCategories, setSavingCategories] = useState(false);
+  const [savingSyncSettings, setSavingSyncSettings] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [mappingDrafts, setMappingDrafts] = useState<Record<string, string[]>>({});
   const [cupDrafts, setCupDrafts] = useState<Record<string, string>>({});
   const [eligibleCategoryDrafts, setEligibleCategoryDrafts] = useState<string[]>([]);
+  const [syncIntervalDraft, setSyncIntervalDraft] = useState("5");
 
   const border = darkMode ? "#2a3050" : "#e5e7eb";
   const surface = darkMode ? "#151820" : "#fff";
@@ -159,8 +182,10 @@ export function OperationsTab({
   const text = darkMode ? "#e2e8f0" : "#111827";
   const muted = darkMode ? "#94a3b8" : "#6b7280";
 
-  async function loadStatus() {
-    setLoading(true);
+  async function loadStatus(showLoading = true) {
+    if (showLoading) {
+      setLoading(true);
+    }
     const response = await fetch("/api/ops/status", { cache: "no-store" });
     const data = (await response.json()) as { ok: boolean; snapshot?: OperationalSnapshot };
     if (data.snapshot) {
@@ -184,8 +209,14 @@ export function OperationsTab({
           .filter((category) => category.isDraftEligible)
           .map((category) => category.externalCategoryId)
       );
+      const syncedAccount = data.snapshot.accounts.find((item) => item.posProvider !== "mock") ?? data.snapshot.accounts[0];
+      if (syncedAccount) {
+        setSyncIntervalDraft(String(syncedAccount.syncIntervalMinutes || 5));
+      }
     }
-    setLoading(false);
+    if (showLoading) {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -196,7 +227,7 @@ export function OperationsTab({
   }, []);
 
   const account = snapshot?.accounts.find((item) => item.posProvider !== "mock") ?? snapshot?.accounts[0] ?? null;
-  const lastSync = snapshot?.logs.find((log) => log.lastSyncedAt)?.lastSyncedAt ?? null;
+  const lastSync = account?.lastSyncAt ?? snapshot?.logs.find((log) => log.lastSyncedAt)?.lastSyncedAt ?? null;
   const isDemoMode = snapshot?.mode === "demo";
   const dbProducts = snapshot?.products ?? [];
   const usableProducts =
@@ -251,27 +282,58 @@ export function OperationsTab({
   const unmappedActive = activeBarrels.filter((barrel) => barrel.externalProductIds.length === 0).length;
   const productsMissingCup = mappingProducts.filter((product) => !product.cupMl).length;
   const draftCategoriesConfigured = snapshot?.draftCategoriesConfigured ?? false;
-
-  const onboarding = useMemo(
-    () => [
-      { label: "Conectar POS", done: Boolean(account?.connected || snapshot?.mode === "demo") },
-      { label: "Sincronizar productos", done: usableProducts.length > 0 },
-      { label: "Crear primer barril", done: usableBarrels.length > 0 },
-      { label: "Mapear productos", done: activeBarrels.length > 0 && unmappedActive === 0 },
-      { label: "Ver consumo", done: activeBarrels.some((barrel) => barrel.mlConsumed > 0) },
-    ],
-    [account?.connected, activeBarrels, snapshot?.mode, unmappedActive, usableBarrels.length, usableProducts.length]
-  );
+  const health = syncHealth(account, syncing);
+  const healthLabel = syncHealthLabel(health);
+  const isSyncRunning = syncing || account?.lastSyncStatus === "running";
+  const summary = syncSummary(snapshot?.logs ?? []);
+  const timeline = syncTimeline(snapshot?.logs ?? [], 5);
 
   async function runSync() {
+    if (isSyncRunning) return;
+
     setSyncing(true);
     setMessage("Sync iniciado. Esta accion es idempotente.");
-    const response = await fetch("/api/ops/sync", {
+    try {
+      const response = await fetch("/api/ops/sync", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          provider: snapshot?.context.posProvider,
+          pos_account_id: account?.posAccountId,
+        }),
+      });
+      const data = (await response.json()) as {
+        ok: boolean;
+        error?: string;
+        snapshot?: OperationalSnapshot;
+      };
+      if (!response.ok || !data.ok) {
+        setMessage(data.error ?? "El sync fallo.");
+      } else {
+        setSnapshot(data.snapshot ?? null);
+        setMessage("Sync completado. Los barriles activos fueron recalculados.");
+      }
+      await loadStatus(false);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "El sync fallo.");
+      await loadStatus(false).catch(() => undefined);
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  async function saveSyncSettings(nextEnabled = account?.autoSyncEnabled ?? true) {
+    if (!account) return;
+
+    setSavingSyncSettings(true);
+    const response = await fetch("/api/ops/sync-settings", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        provider: snapshot?.context.posProvider,
-        pos_account_id: account?.posAccountId,
+        pos_provider: account.posProvider,
+        pos_account_id: account.posAccountId,
+        auto_sync_enabled: nextEnabled,
+        sync_interval_minutes: Number(syncIntervalDraft) || account.syncIntervalMinutes || 5,
       }),
     });
     const data = (await response.json()) as {
@@ -279,13 +341,18 @@ export function OperationsTab({
       error?: string;
       snapshot?: OperationalSnapshot;
     };
+
     if (!response.ok || !data.ok) {
-      setMessage(data.error ?? "El sync fallo.");
+      setMessage(data.error ?? "No se pudo guardar la configuracion de auto-sync.");
     } else {
       setSnapshot(data.snapshot ?? null);
-      setMessage("Sync completado. Los barriles activos fueron recalculados.");
+      const syncedAccount = data.snapshot?.accounts.find((item) => item.posAccountId === account.posAccountId);
+      if (syncedAccount) {
+        setSyncIntervalDraft(String(syncedAccount.syncIntervalMinutes || 5));
+      }
+      setMessage("Configuracion de auto-sync guardada.");
     }
-    setSyncing(false);
+    setSavingSyncSettings(false);
   }
 
   async function saveEligibleCategories() {
@@ -411,15 +478,6 @@ export function OperationsTab({
               Conexion, sync, mapeos y estado operativo
             </div>
           </div>
-          <button
-            onClick={() => void runSync()}
-            disabled={syncing}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold text-white disabled:opacity-60"
-            style={{ background: "linear-gradient(135deg,#9f1239,#f43f5e)" }}
-          >
-            <RefreshCcw size={14} className={syncing ? "animate-spin" : ""} />
-            Sync manual
-          </button>
         </div>
       </div>
 
@@ -468,42 +526,163 @@ export function OperationsTab({
             </div>
 
             <div className={cardBase} style={{ background: surface, border: `1.5px solid ${border}` }}>
-              <div className={smallLabel}>Sync status</div>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className={smallLabel}>Auto-sync</div>
+                  <div className="text-sm font-semibold mt-1" style={{ color: text }}>
+                    {syncModeLabel(account)}
+                  </div>
+                </div>
+                <button
+                  onClick={() => void saveSyncSettings(!(account?.autoSyncEnabled ?? true))}
+                  disabled={savingSyncSettings || !account}
+                  className="px-2 py-1 rounded-md text-[11px] font-semibold disabled:opacity-60"
+                  style={{
+                    background: account?.autoSyncEnabled ? "#dcfce7" : darkMode ? "#1c2030" : "#f3f4f6",
+                    color: account?.autoSyncEnabled ? "#16a34a" : muted,
+                    border: `1px solid ${border}`,
+                  }}
+                >
+                  {account?.autoSyncEnabled ? "ON" : "OFF"}
+                </button>
+              </div>
+              <div
+                className="mt-3 rounded-lg p-2 flex items-center gap-2"
+                style={{ background: darkMode ? "#0f1117" : "#f9fafb", border: `1px solid ${border}` }}
+              >
+                <span
+                  className="w-2.5 h-2.5 rounded-full inline-block"
+                  style={{ background: healthColor(health) }}
+                />
+                <Activity size={14} color={healthColor(health)} className={health === "running" ? "animate-pulse" : ""} />
+                <span className="text-xs font-semibold" style={{ color: healthColor(health) }}>
+                  {healthLabel}
+                </span>
+              </div>
+              <div className="mt-3 flex items-center justify-between gap-2">
+                <div>
+                  <div className="text-[10px] text-muted-foreground">Manual sync</div>
+                  <div className="text-[11px]" style={{ color: muted }}>
+                    Uses the same sync engine as cron
+                  </div>
+                </div>
+                <button
+                  onClick={() => void runSync()}
+                  disabled={isSyncRunning || !account?.connected}
+                  className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-white disabled:opacity-60"
+                  style={{ background: "linear-gradient(135deg,#9f1239,#f43f5e)" }}
+                >
+                  <RefreshCcw size={13} className={isSyncRunning ? "animate-spin" : ""} />
+                  {isSyncRunning ? "Syncing..." : "Sync Now"}
+                </button>
+              </div>
               <div className="grid grid-cols-2 gap-2 mt-3">
                 <div>
-                  <div className="font-mono text-lg font-bold" style={{ color: text }}>
-                    {usableProducts.length}
+                  <div className="text-[10px] text-muted-foreground">Next sync</div>
+                  <div className="font-mono text-xs font-semibold mt-0.5" style={{ color: text }}>
+                    {fmtDate(account?.nextSyncAt)}
                   </div>
-                  <div className="text-[10px] text-muted-foreground">Productos</div>
                 </div>
                 <div>
-                  <div className="font-mono text-lg font-bold" style={{ color: text }}>
-                    {activeBarrels.length}
+                  <div className="text-[10px] text-muted-foreground">Last sync</div>
+                  <div className="font-mono text-xs font-semibold mt-0.5" style={{ color: text }}>
+                    {fmtDate(lastSync)}
                   </div>
-                  <div className="text-[10px] text-muted-foreground">Barriles activos</div>
                 </div>
               </div>
-              <div className="text-[11px] mt-3" style={{ color: muted }}>
-                Ultimo sync: {fmtDate(lastSync)}
+              <div className="text-[11px] mt-1" style={{ color: account?.lastSyncStatus === "error" ? "#dc2626" : muted }}>
+                Resultado: {account?.lastSyncStatus ?? "Pendiente"}
+                {account?.lastSyncError ? ` · ${account.lastSyncError}` : ""}
+              </div>
+              <div className="flex items-center gap-2 mt-2">
+                <label className="text-[11px]" style={{ color: muted }}>
+                  Intervalo
+                </label>
+                <input
+                  value={syncIntervalDraft}
+                  onChange={(event) => setSyncIntervalDraft(event.target.value)}
+                  type="number"
+                  min="1"
+                  className="w-16 px-2 py-1 rounded-md text-[11px]"
+                  style={{
+                    background: darkMode ? "#0f1117" : "#fff",
+                    border: `1px solid ${border}`,
+                    color: text,
+                  }}
+                />
+                <span className="text-[11px]" style={{ color: muted }}>min</span>
+                <button
+                  onClick={() => void saveSyncSettings()}
+                  disabled={savingSyncSettings || !account}
+                  className="px-2 py-1 rounded-md text-[11px] font-semibold disabled:opacity-60"
+                  style={{ background: "#111827", color: "#fff" }}
+                >
+                  Guardar
+                </button>
               </div>
             </div>
 
             <div className={cardBase} style={{ background: surface, border: `1.5px solid ${border}` }}>
-              <div className={smallLabel}>Onboarding</div>
-              <div className="space-y-2 mt-3">
-                {onboarding.map((step) => (
-                  <div key={step.label} className="flex items-center gap-2 text-xs">
-                    <span
-                      className="w-4 h-4 rounded-full inline-flex items-center justify-center"
-                      style={{ background: step.done ? "#dcfce7" : "#f3f4f6", color: step.done ? "#16a34a" : "#9ca3af" }}
-                    >
-                      {step.done ? <Check size={11} /> : ""}
-                    </span>
-                    <span style={{ color: step.done ? text : muted }}>{step.label}</span>
+              <div className={smallLabel}>Last sync summary</div>
+              <div className="grid grid-cols-2 gap-2 mt-3">
+                {[
+                  ["Products", summary.products],
+                  ["Locations", summary.locations],
+                  ["Employees", summary.employees],
+                  ["Transactions", summary.transactions],
+                  ["Active barrels", summary.activeBarrels],
+                ].map(([label, value]) => (
+                  <div key={label} className={label === "Active barrels" ? "col-span-2" : ""}>
+                    <div className="font-mono text-lg font-bold" style={{ color: text }}>{value}</div>
+                    <div className="text-[10px] text-muted-foreground">{label}</div>
                   </div>
                 ))}
               </div>
             </div>
+          </div>
+
+          <div className={cardBase} style={{ background: surface, border: `1.5px solid ${border}` }}>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className={smallLabel}>Recent sync timeline</div>
+                <div className="text-sm font-semibold mt-1" style={{ color: text }}>
+                  Last 5 sync log entries
+                </div>
+              </div>
+              <div className="text-[11px]" style={{ color: muted }}>
+                Manual and cron use the same sync engine
+              </div>
+            </div>
+            {timeline.length === 0 ? (
+              <div className="text-xs mt-3" style={{ color: muted }}>
+                Aun no hay logs de sync.
+              </div>
+            ) : (
+              <div className="grid gap-2 mt-3 md:grid-cols-5">
+                {timeline.map((item) => (
+                  <div
+                    key={item.id}
+                    className="rounded-lg p-2"
+                    style={{ background: darkMode ? "#0f1117" : "#f9fafb", border: `1px solid ${border}` }}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full" style={{ background: healthColor(item.status) }} />
+                      <span className="text-[11px] font-semibold" style={{ color: healthColor(item.status) }}>
+                        {item.label}
+                      </span>
+                    </div>
+                    <div className="text-[10px] mt-1" style={{ color: muted }}>{fmtDate(item.time)}</div>
+                    <div className="text-[10px] mt-1" style={{ color: muted }}>Duration: {item.duration}</div>
+                    <div className="text-[10px] mt-1" style={{ color: muted }}>Tx: {item.transactions}</div>
+                    {item.error && (
+                      <div className="text-[10px] mt-1" style={{ color: "#dc2626" }}>
+                        {item.error}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {(unmappedActive > 0 || productsMissingCup > 0 || !account?.connected || !draftCategoriesConfigured) && (

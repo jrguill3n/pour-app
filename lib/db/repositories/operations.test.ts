@@ -8,6 +8,7 @@ import {
   findMappedProductsMissingCupMl,
   hasConfiguredDraftCategories,
   hasRealConnectedAccount,
+  normalizeOperationalBarrelEdit,
   occupiedLineNumbers,
   volumeLToVolumeMl,
   volumeMlToVolumeL,
@@ -132,5 +133,25 @@ describe("operational demo/real boundary", () => {
   it("round-trips a 20L barrel as 20000ml for persistence and rendering", () => {
     expect(volumeLToVolumeMl(20)).toBe(20000);
     expect(volumeMlToVolumeL(20000)).toBe(20);
+  });
+
+  it("normalizes edited barrel cost, volume, and opener for persistence", () => {
+    expect(
+      normalizeOperationalBarrelEdit({
+        pricePaid: 3018,
+        volumeL: 20,
+        openedBy: "  Ramon  ",
+      })
+    ).toEqual({
+      pricePaidCents: 301800,
+      volumeMl: 20000,
+      openedBy: "Ramon",
+    });
+  });
+
+  it("normalizes a 30L edit as 30000ml", () => {
+    expect(normalizeOperationalBarrelEdit({ volumeL: 30 })).toMatchObject({
+      volumeMl: 30000,
+    });
   });
 });

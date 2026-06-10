@@ -531,8 +531,6 @@ export function normalizePosterSale(
   transaction: PosterTransaction,
   merchant_id?: string
 ): NormalizedSale {
-  const discount_cents = toCents(transaction.discount);
-  const gross_cents = toCents(transaction.sum || transaction.payed_sum) + discount_cents;
   const status = transaction.status ?? null;
   const normalizedStatus = status?.toLowerCase() ?? "";
   const is_refunded =
@@ -548,15 +546,17 @@ export function normalizePosterSale(
     normalizedStatus.includes("cancel");
   const line_items = (transaction.products || []).map((product) => {
     const quantity = Number.parseFloat(String(product.num || "0")) || 0;
-    const grossSource = product.product_sum ?? product.payed_sum;
+    const grossSource = product.product_sum;
+    const netSource = product.payed_sum;
+    const explicitDiscountCents = toCents(product.discount);
+    const grossCents = grossSource !== undefined ? toCents(grossSource) : toCents(netSource) + explicitDiscountCents;
+    const netCents = netSource !== undefined ? toCents(netSource) : Math.max(0, grossCents - explicitDiscountCents);
     const unit_price_cents =
       product.product_price !== undefined
         ? toCents(product.product_price)
         : quantity > 0
-        ? Math.round(toCents(grossSource) / quantity)
+        ? Math.round(grossCents / quantity)
         : 0;
-    const item_discount_cents = toCents(product.discount);
-    const item_gross_cents = grossSource !== undefined ? toCents(grossSource) : Math.round(quantity * unit_price_cents);
     const externalProductId = posterVariantExternalProductId(product.product_id, product.modification_id);
 
     return {
@@ -564,11 +564,29 @@ export function normalizePosterSale(
       name: product.product_name ?? externalProductId,
       quantity,
       unit_price_cents,
-      gross_cents: item_gross_cents,
-      discount_cents: item_discount_cents,
-      net_cents: Math.max(0, item_gross_cents - item_discount_cents),
+      gross_cents: grossCents,
+      discount_cents: Math.max(0, explicitDiscountCents || grossCents - netCents),
+      net_cents: Math.max(0, netCents),
     };
   });
+  const lineGrossCents = line_items.reduce((sum, item) => sum + item.gross_cents, 0);
+  const lineDiscountCents = line_items.reduce((sum, item) => sum + item.discount_cents, 0);
+  const lineNetCents = line_items.reduce((sum, item) => sum + item.net_cents, 0);
+  const explicitTransactionDiscountCents = toCents(transaction.discount);
+  const explicitTransactionNetCents =
+    transaction.payed_sum !== undefined ? toCents(transaction.payed_sum) : null;
+  const explicitTransactionGrossCents =
+    transaction.sum !== undefined
+      ? toCents(transaction.sum)
+      : explicitTransactionNetCents !== null
+        ? explicitTransactionNetCents + explicitTransactionDiscountCents
+        : null;
+  const gross_cents = explicitTransactionGrossCents ?? lineGrossCents;
+  const net_cents = explicitTransactionNetCents ?? lineNetCents;
+  const discount_cents =
+    explicitTransactionDiscountCents > 0
+      ? explicitTransactionDiscountCents
+      : lineDiscountCents || Math.max(0, gross_cents - net_cents);
 
   return {
     id: `poster:${transaction.transaction_id}`,
@@ -580,7 +598,7 @@ export function normalizePosterSale(
     created_at: posterTransactionCreatedAt(transaction),
     gross_cents,
     discount_cents,
-    net_cents: Math.max(0, gross_cents - discount_cents),
+    net_cents: Math.max(0, net_cents),
     is_refunded,
     is_voided,
     status,

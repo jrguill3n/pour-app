@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   createOperationalBarrel,
   getOperationalSnapshot,
+  saveProductCupMlMapping,
+  updateOperationalBarrel,
 } from "@/lib/db/repositories/operations";
 import { findMappedProductsMissingCupMl } from "@/lib/db/repositories/operations-boundary";
 import type { POSProvider } from "@/lib/pos/types";
@@ -18,6 +20,21 @@ interface CreateBarrelPayload {
   volume_l?: number;
   price_paid?: number;
   opened_by?: string | null;
+}
+
+interface UpdateBarrelPayload {
+  merchant_id?: string;
+  pos_provider?: POSProvider;
+  barrel_id?: string;
+  brand?: string | null;
+  group_name?: string | null;
+  beer_style?: string | null;
+  abv?: number | null;
+  external_product_ids?: string[];
+  volume_l?: number | null;
+  price_paid?: number | null;
+  opened_by?: string | null;
+  cup_ml_by_external_product_id?: Record<string, number>;
 }
 
 export async function POST(request: NextRequest) {
@@ -85,4 +102,57 @@ export async function POST(request: NextRequest) {
 
     throw error;
   }
+}
+
+export async function PATCH(request: NextRequest) {
+  const body = (await request.json().catch(() => null)) as UpdateBarrelPayload | null;
+
+  if (!body?.barrel_id) {
+    return NextResponse.json({ ok: false, error: "barrel_id is required." }, { status: 400 });
+  }
+
+  const snapshot = await getOperationalSnapshot(body.pos_provider);
+  const context = {
+    merchantId: body.merchant_id ?? snapshot.context.merchantId,
+    posProvider: body.pos_provider ?? snapshot.context.posProvider,
+  };
+
+  const knownBarrel = snapshot.barrels.find((barrel) => barrel.id === body.barrel_id);
+  if (!knownBarrel) {
+    return NextResponse.json({ ok: false, error: "Barrel not found for this merchant." }, { status: 404 });
+  }
+
+  const externalProductIds = body.external_product_ids ?? knownBarrel.externalProductIds;
+  const cupMlByExternalProductId = body.cup_ml_by_external_product_id ?? {};
+  const missingCupMl = findMappedProductsMissingCupMl(externalProductIds, snapshot.products, cupMlByExternalProductId);
+
+  if (missingCupMl.length > 0) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "cup_ml is required for every linked product before saving barrel mappings.",
+        missing_external_product_ids: missingCupMl,
+      },
+      { status: 400 }
+    );
+  }
+
+  for (const [externalProductId, cupMl] of Object.entries(cupMlByExternalProductId)) {
+    if (Number.isFinite(cupMl) && cupMl > 0) {
+      await saveProductCupMlMapping(context, externalProductId, cupMl);
+    }
+  }
+
+  const nextSnapshot = await updateOperationalBarrel(context, body.barrel_id, {
+    brand: body.brand,
+    groupName: body.group_name,
+    beerStyle: body.beer_style,
+    abv: body.abv,
+    externalProductIds: body.external_product_ids,
+    volumeL: body.volume_l,
+    pricePaid: body.price_paid,
+    openedBy: body.opened_by,
+  });
+
+  return NextResponse.json({ ok: true, snapshot: nextSnapshot });
 }

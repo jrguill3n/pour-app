@@ -10,6 +10,7 @@ import {
   filterProductsByEligibleCategories,
   hasRealConnectedAccount,
   hasConfiguredDraftCategories,
+  normalizeOperationalBarrelEdit,
   volumeLToVolumeMl,
 } from "./operations-boundary";
 
@@ -27,6 +28,12 @@ export interface OperationalAccount {
   posAccountId: string;
   connected: boolean;
   tokenExpiresAt: string | null;
+  autoSyncEnabled: boolean;
+  syncIntervalMinutes: number;
+  lastSyncAt: string | null;
+  nextSyncAt: string | null;
+  lastSyncStatus: string | null;
+  lastSyncError: string | null;
   updatedAt: string;
 }
 
@@ -335,6 +342,12 @@ export async function getOperationalSnapshot(
         posAccountId: row.posAccountId,
         connected: Boolean(row.accessToken),
         tokenExpiresAt: toIso(row.tokenExpiresAt),
+        autoSyncEnabled: row.autoSyncEnabled,
+        syncIntervalMinutes: row.syncIntervalMinutes,
+        lastSyncAt: toIso(row.lastSyncAt),
+        nextSyncAt: toIso(row.nextSyncAt),
+        lastSyncStatus: row.lastSyncStatus,
+        lastSyncError: row.lastSyncError,
         updatedAt: toIso(row.updatedAt) ?? new Date().toISOString(),
       })),
       products,
@@ -465,6 +478,12 @@ export async function getOperationalSnapshot(
       posAccountId: row.posAccountId,
       connected: Boolean(row.accessToken),
       tokenExpiresAt: toIso(row.tokenExpiresAt),
+      autoSyncEnabled: row.autoSyncEnabled,
+      syncIntervalMinutes: row.syncIntervalMinutes,
+      lastSyncAt: toIso(row.lastSyncAt),
+      nextSyncAt: toIso(row.nextSyncAt),
+      lastSyncStatus: row.lastSyncStatus,
+      lastSyncError: row.lastSyncError,
       updatedAt: toIso(row.updatedAt) ?? new Date().toISOString(),
     })),
     products,
@@ -562,6 +581,17 @@ export interface CreateOperationalBarrelInput {
   openedBy?: string | null;
 }
 
+export interface UpdateOperationalBarrelInput {
+  brand?: string | null;
+  groupName?: string | null;
+  beerStyle?: string | null;
+  abv?: number | null;
+  externalProductIds?: string[];
+  volumeL?: number | null;
+  pricePaid?: number | null;
+  openedBy?: string | null;
+}
+
 export async function createOperationalBarrel(
   context: OperationalContext,
   input: CreateOperationalBarrelInput
@@ -637,6 +667,60 @@ export async function createOperationalBarrel(
   }
 
   await runtime.db.insert(sqlite.barrels).values(values);
+  return getOperationalSnapshot(context.posProvider);
+}
+
+export async function updateOperationalBarrel(
+  context: OperationalContext,
+  barrelId: string,
+  input: UpdateOperationalBarrelInput
+): Promise<OperationalSnapshot> {
+  const runtime = getDatabase();
+  const now = new Date();
+  const normalized = normalizeOperationalBarrelEdit({
+    pricePaid: input.pricePaid,
+    volumeL: input.volumeL,
+    openedBy: input.openedBy,
+  });
+  const values = {
+    ...(input.brand !== undefined ? { brand: input.brand } : {}),
+    ...(input.groupName !== undefined ? { groupName: input.groupName } : {}),
+    ...(input.beerStyle !== undefined ? { beerStyle: input.beerStyle } : {}),
+    ...(input.abv !== undefined
+      ? { abv: typeof input.abv === "number" && Number.isFinite(input.abv) ? Math.round(input.abv * 100) : null }
+      : {}),
+    ...(input.externalProductIds !== undefined ? { externalProductIds: input.externalProductIds } : {}),
+    ...(input.volumeL !== undefined ? { volumeMl: normalized.volumeMl ?? 0 } : {}),
+    ...(input.pricePaid !== undefined ? { pricePaidCents: normalized.pricePaidCents } : {}),
+    ...(input.openedBy !== undefined ? { openedBy: normalized.openedBy } : {}),
+    raw: { source: "pour-local-edit", input },
+    updatedAt: now,
+  };
+
+  if (runtime.dialect === "postgres") {
+    await runtime.db
+      .update(pg.barrels)
+      .set(values)
+      .where(
+        and(
+          eq(pg.barrels.id, barrelId),
+          eq(pg.barrels.merchantId, context.merchantId),
+          eq(pg.barrels.posProvider, context.posProvider)
+        )
+      );
+    return getOperationalSnapshot(context.posProvider);
+  }
+
+  await runtime.db
+    .update(sqlite.barrels)
+    .set(values)
+    .where(
+      and(
+        eq(sqlite.barrels.id, barrelId),
+        eq(sqlite.barrels.merchantId, context.merchantId),
+        eq(sqlite.barrels.posProvider, context.posProvider)
+      )
+    );
   return getOperationalSnapshot(context.posProvider);
 }
 

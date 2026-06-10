@@ -77,6 +77,79 @@ describe("calculateBarrelConsumption", () => {
     });
   });
 
+  it("counts full-price pints as volume and net revenue", () => {
+    const totals = calculateBarrelConsumption(
+      [{ id: "barrel-1", externalProductIds: ["pinta"] }],
+      [
+        {
+          id: "full-price",
+          gross_cents: 12000,
+          discount_cents: 0,
+          net_cents: 12000,
+          line_items: [{ external_product_id: "pinta", quantity: 1, gross_cents: 12000, net_cents: 12000 }],
+        },
+      ],
+      { pinta: 355 }
+    );
+
+    expect(totals["barrel-1"]).toEqual({
+      ml_consumed: 355,
+      revenue_bruto_cents: 12000,
+      revenue_descuentos_cents: 0,
+      revenue_neto_cents: 12000,
+    });
+  });
+
+  it("counts discounted pints as full volume with discounted net revenue", () => {
+    const totals = calculateBarrelConsumption(
+      [{ id: "barrel-1", externalProductIds: ["pinta"] }],
+      [
+        {
+          id: "discounted",
+          gross_cents: 12000,
+          discount_cents: 6000,
+          net_cents: 6000,
+          line_items: [
+            { external_product_id: "pinta", quantity: 1, gross_cents: 12000, discount_cents: 6000, net_cents: 6000 },
+          ],
+        },
+      ],
+      { pinta: 355 }
+    );
+
+    expect(totals["barrel-1"]).toEqual({
+      ml_consumed: 355,
+      revenue_bruto_cents: 12000,
+      revenue_descuentos_cents: 6000,
+      revenue_neto_cents: 6000,
+    });
+  });
+
+  it("counts free comped pints as volume with zero net revenue", () => {
+    const totals = calculateBarrelConsumption(
+      [{ id: "barrel-1", externalProductIds: ["pinta"] }],
+      [
+        {
+          id: "comped",
+          gross_cents: 12000,
+          discount_cents: 12000,
+          net_cents: 0,
+          line_items: [
+            { external_product_id: "pinta", quantity: 1, gross_cents: 12000, discount_cents: 12000, net_cents: 0 },
+          ],
+        },
+      ],
+      { pinta: 355 }
+    );
+
+    expect(totals["barrel-1"]).toEqual({
+      ml_consumed: 355,
+      revenue_bruto_cents: 12000,
+      revenue_descuentos_cents: 12000,
+      revenue_neto_cents: 0,
+    });
+  });
+
   it("does not count transactions before the barrel opened", () => {
     const totals = calculateBarrelConsumption(
       [{ id: "barrel-1", externalProductIds: ["pinta-lupulosa"], opened_at: "2026-06-03T02:01:18.000Z" }],

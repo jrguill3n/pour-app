@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { getKegBoardInitialState } from "@/lib/repositories/mock-pour-repository";
 import { volumeMlToVolumeL } from "@/lib/db/repositories/operations-boundary";
-import type { Barrel, Line, Template, BarConfig, MenuConfig, Product } from "@/lib/core/types";
+import type { Barrel, BarrelEditFields, Line, Template, BarConfig, MenuConfig, Product } from "@/lib/core/types";
 import type { POSProvider } from "@/lib/pos/types";
 import { remPct, yPct, yColor } from "@/lib/pour-utils";
 import { PourLogo } from "./pour-logo";
@@ -11,6 +11,7 @@ import { LineCard } from "./line-card";
 import { DetailPanel } from "./detail-panel";
 import { DashboardTab } from "./dashboard-tab";
 import { OperationsTab } from "./operations-tab";
+import { DebugBadge } from "./debug-badge";
 
 const initialState = getKegBoardInitialState();
 
@@ -132,6 +133,7 @@ function barrelFromOperational(
 ): Barrel {
   return {
     id: Number.isFinite(Number(barrel.id)) ? Number(barrel.id) : index + 1,
+    dbId: barrel.id,
     kegId: barrel.kegId ?? barrel.id,
     location_id: null,
     lineId: barrel.lineId,
@@ -142,7 +144,9 @@ function barrelFromOperational(
     external_product_ids: barrel.externalProductIds,
     pos_provider: barrel.posProvider as POSProvider,
     volumeL: volumeMlToVolumeL(barrel.volumeMl),
+    volumeMl: barrel.volumeMl,
     pricePaid: (barrel.pricePaidCents ?? 0) / 100,
+    pricePaidCents: barrel.pricePaidCents,
     openedAt: barrel.openedAt,
     openedBy: barrel.openedBy ?? "",
     status: barrel.status === "closed" ? "closed" : "active",
@@ -206,12 +210,16 @@ export function KegBoard() {
       });
     }
 
-    void loadDataMode().catch(() => {
+    void loadDataMode().catch((error) => {
       if (!active) return;
-      setDataMode("demo");
-      setProducts(initialState.products);
-      setBarrels(initialState.barrels);
-      setTemplates(initialState.templates);
+      console.warn("Could not load operational status; refusing to show seeded demo data as a fallback.", {
+        message: error instanceof Error ? error.message : "Unknown status error",
+      });
+      setDataMode(null);
+      setProducts([]);
+      setBarrels([]);
+      setTemplates([]);
+      setLines([]);
     });
 
     return () => {
@@ -291,7 +299,9 @@ export function KegBoard() {
         pos_provider: "mock",
         location_id: null,
         volumeL: data.volumeL,
+        volumeMl: Math.round(data.volumeL * 1000),
         pricePaid: data.pricePaid,
+        pricePaidCents: Math.round(data.pricePaid * 100),
         openedAt: new Date().toISOString(),
         openedBy: data.openedBy,
         status: "active",
@@ -313,14 +323,70 @@ export function KegBoard() {
     );
   }
 
-  function handleEdit(barrelId: number, fields: Partial<Barrel>) {
+  async function handleEdit(barrelId: number, fields: BarrelEditFields) {
+    if (dataMode === "connected" && operationalContext) {
+      const currentBarrel = barrels.find((barrel) => barrel.id === barrelId);
+      if (!currentBarrel?.dbId) {
+        console.warn("Could not edit local barrel because the persisted id is missing.", { barrelId });
+        return false;
+      }
+
+      const response = await fetch("/api/ops/barrels", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          merchant_id: operationalContext.merchantId,
+          pos_provider: operationalContext.posProvider,
+          barrel_id: currentBarrel.dbId,
+          brand: fields.brand,
+          group_name: fields.group,
+          beer_style: fields.beerStyle ?? null,
+          abv: fields.abv ?? null,
+          external_product_ids: fields.external_product_ids,
+          volume_l: fields.volumeL,
+          price_paid: fields.pricePaid,
+          opened_by: fields.openedBy,
+        }),
+      });
+      const result = (await response.json()) as OperationalStatusResponse & { error?: string };
+
+      if (!response.ok || !result.ok) {
+        console.warn("Could not edit local barrel.", { error: result.error, barrelId: currentBarrel.dbId });
+        return false;
+      }
+
+      setLines((result.snapshot?.lines ?? []).map(lineFromOperational));
+      setBarrels((result.snapshot?.barrels ?? []).map(barrelFromOperational));
+      setProducts((result.snapshot?.mappingProducts ?? []).map(productFromOperational));
+      setOperationalContext(result.snapshot?.context ?? operationalContext);
+      return true;
+    }
+
     setBarrels((bs) =>
       bs.map((b) =>
         b.id === barrelId
-          ? { ...b, ...fields, editedAt: new Date().toISOString(), editedBy: currentEmployee }
+          ? {
+              ...b,
+              ...fields,
+              volumeL: fields.volumeL ?? b.volumeL,
+              volumeMl:
+                fields.volumeL !== undefined && fields.volumeL !== null
+                  ? Math.round(fields.volumeL * 1000)
+                  : b.volumeMl,
+              pricePaid: fields.pricePaid ?? b.pricePaid,
+              pricePaidCents:
+                fields.pricePaid !== undefined && fields.pricePaid !== null
+                  ? Math.round(fields.pricePaid * 100)
+                  : fields.pricePaid === null
+                    ? null
+                    : b.pricePaidCents,
+              editedAt: new Date().toISOString(),
+              editedBy: currentEmployee,
+            }
           : b
       )
     );
+    return true;
   }
 
   function handleVoid(barrelId: number) {
@@ -447,7 +513,7 @@ export function KegBoard() {
           className="text-[11px]"
           style={{ color: darkMode ? "#475569" : "#9ca3af" }}
         >
-          {dataMode === "connected" ? "POS conectado" : "Mock POS"} ·{" "}
+          {dataMode === "connected" ? "POS conectado" : dataMode === "demo" ? "Mock POS" : "POS sin estado"} ·{" "}
           <span
             className="font-medium"
             style={{ color: darkMode ? "#94a3b8" : "#374151" }}
@@ -456,6 +522,8 @@ export function KegBoard() {
           </span>
         </div>
       </div>
+
+      <DebugBadge darkMode={darkMode} />
 
       {/* Content */}
       <div className="flex-1 overflow-hidden flex flex-col">

@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import type { Barrel, Line, BarConfig, Template, Product } from "@/lib/core/types";
+import type { Barrel, BarrelEditFields, Line, BarConfig, Template, Product } from "@/lib/core/types";
+import { formatBarrelMetadata } from "@/lib/core/barrel-metadata";
 import { remPct, yPct, yColor, yBg, yBorder, fmtDate, fmtL } from "@/lib/pour-utils";
 import { WaveIcon, LevelBar } from "./pour-logo";
 import { ProductSelector } from "./product-selector";
@@ -48,7 +49,7 @@ interface DetailPanelProps {
     }
   ) => void;
   onClose: (barrelId: number, mermaMl: number, closedBy: string) => void;
-  onEdit: (barrelId: number, fields: Partial<Barrel>) => void;
+  onEdit: (barrelId: number, fields: BarrelEditFields) => void | Promise<boolean | void>;
   onDeselect: () => void;
   onSaveTemplate: (
     data: {
@@ -90,6 +91,7 @@ export function DetailPanel({
     abv?: string;
     volumeL?: string;
     pricePaid?: string;
+    openedBy?: string;
   }>({});
   const [form, setForm] = useState({
     brand: "",
@@ -130,6 +132,11 @@ export function DetailPanel({
 
   const isEmpty = !barrel;
   const totalMl = barrel ? barrel.volumeL * 1000 : 0;
+  const barrelMetadata = formatBarrelMetadata({
+    openedBy: barrel?.openedBy,
+    pricePaidCents: barrel?.pricePaidCents,
+    volumeMl: barrel?.volumeMl,
+  });
   const consumedMl = barrel && Number.isFinite(barrel.mlConsumed) ? barrel.mlConsumed : 0;
   const remainingMl = Math.max(0, totalMl - consumedMl);
   const rPct = barrel ? remPct(consumedMl, totalMl) : 0;
@@ -159,18 +166,6 @@ export function DetailPanel({
     };
   });
   const totalUnitsSold = barrelProductSalesRows.reduce((sum, row) => sum + row.unitsSold, 0);
-  const linkedProductPrices = barrelProducts
-    .map((product) => product.price_cents)
-    .filter((priceCents): priceCents is number => typeof priceCents === "number" && Number.isFinite(priceCents) && priceCents > 0)
-    .map((priceCents) => priceCents / 100);
-  const averageLinkedUnitPrice =
-    linkedProductPrices.length > 0
-      ? linkedProductPrices.reduce((sum, price) => sum + price, 0) / linkedProductPrices.length
-      : 0;
-  const breakEvenUnits =
-    barrel && barrel.pricePaid > 0 && averageLinkedUnitPrice > 0
-      ? Math.ceil(barrel.pricePaid / averageLinkedUnitPrice)
-      : null;
   const getProds = (ids: string[]) => products.filter((p) => ids.includes(p.external_product_id));
   const selectedProducts = getProds(form.external_product_ids);
   const selectedProductsHaveCupMl = selectedProducts.every((p) => Number.isFinite(p.cupMl) && p.cupMl > 0);
@@ -723,6 +718,22 @@ export function DetailPanel({
         </div>
         <div className="mb-3">
           <label style={lb}>
+            Abierto por{" "}
+            <span className="text-muted-foreground text-[10px] font-normal">
+              opcional
+            </span>
+          </label>
+          <input
+            value={editForm.openedBy || ""}
+            onChange={(e) =>
+              setEditForm((f) => ({ ...f, openedBy: e.target.value }))
+            }
+            placeholder="Nombre del operador"
+            style={inp}
+          />
+        </div>
+        <div className="mb-3">
+          <label style={lb}>
             ABV %{" "}
             <span className="text-muted-foreground text-[10px] font-normal">
               opcional
@@ -791,19 +802,26 @@ export function DetailPanel({
         <button
           disabled={!editForm.group}
           onClick={() => {
-            onEdit(barrel.id, {
-              brand: editForm.brand,
-              group: editForm.group,
-              beerStyle: editForm.beerStyle,
-              abv: editForm.abv ? parseFloat(editForm.abv) : null,
-              volumeL: editForm.volumeL
-                ? parseFloat(editForm.volumeL)
-                : barrel.volumeL,
-              pricePaid: editForm.pricePaid
-                ? parseFloat(editForm.pricePaid)
-                : barrel.pricePaid,
-            });
-            setScreen("view");
+            void (async () => {
+              const saved = await onEdit(barrel.id, {
+                brand: editForm.brand,
+                group: editForm.group,
+                beerStyle: editForm.beerStyle,
+                abv: editForm.abv ? parseFloat(editForm.abv) : null,
+                volumeL: editForm.volumeL
+                  ? parseFloat(editForm.volumeL)
+                  : barrel.volumeL,
+                pricePaid: editForm.pricePaid
+                  ? parseFloat(editForm.pricePaid)
+                  : barrel.pricePaidCents == null
+                    ? null
+                    : barrel.pricePaid,
+                openedBy: editForm.openedBy ?? barrel.openedBy,
+              });
+              if (saved !== false) {
+                setScreen("view");
+              }
+            })();
           }}
           className="w-full py-3 rounded-lg text-sm font-semibold"
           style={{
@@ -1204,9 +1222,9 @@ export function DetailPanel({
             style={{ background: darkMode ? "#151820" : "#f9fafb" }}
           >
             {[
-              ["Abierto por", barrel.openedBy],
-              ["Costo barril", `$${barrel.pricePaid.toLocaleString()}`],
-              ["Volumen inicial", `${barrel.volumeL}L`],
+              ["Abierto por", barrelMetadata.openedBy],
+              ["Costo barril", barrelMetadata.kegCost],
+              ["Volumen inicial", barrelMetadata.initialVolume],
             ].map(([l, v]) => (
               <div key={l} className="flex justify-between mb-1">
                 <span
@@ -1280,29 +1298,21 @@ export function DetailPanel({
                 const neto = (barrel.revenueNetoCents || 0) / 100;
                 const costRecoveryPct =
                   barrel.pricePaid > 0 ? ((neto / barrel.pricePaid) * 100).toFixed(1) : null;
-                const margen =
-                  barrel.pricePaid > 0 && neto >= barrel.pricePaid
-                    ? (((neto - barrel.pricePaid) / neto) * 100).toFixed(1)
-                    : null;
                 const revPerL =
                   barrel.mlConsumed > 0
                     ? (neto / (barrel.mlConsumed / 1000)).toFixed(2)
                     : null;
                 const rows: [string, string, string?][] = [
-                  ["Bruto", `$${bruto.toLocaleString()}`],
+                  ["Gross sales", `$${bruto.toLocaleString()}`],
                   ...(desc > 0
-                    ? ([["Descuentos", `-$${desc.toLocaleString()}`, "#dc2626"]] as [string, string, string?][])
+                    ? ([["Discounts", `-$${desc.toLocaleString()}`, "#dc2626"]] as [string, string, string?][])
                     : []),
-                  ["Neto", `$${neto.toLocaleString()}`],
-                  ["Costo barril", `$${barrel.pricePaid.toLocaleString()}`],
+                  ["Net sales", `$${neto.toLocaleString()}`],
+                  ["Costo barril", barrelMetadata.kegCost],
                   ...(costRecoveryPct
                     ? ([["Recuperación costo", `${costRecoveryPct}%`]] as [string, string, string?][])
                     : []),
                   ["Unidades vendidas", totalUnitsSold.toLocaleString()],
-                  ["Unidades equilibrio", breakEvenUnits ? breakEvenUnits.toLocaleString() : "—"],
-                  ...(margen
-                    ? ([["Margen bruto", `${margen}%`, "#16a34a"]] as [string, string, string?][])
-                    : []),
                   ...(revPerL ? ([["$/litro vendido", `$${revPerL}`]] as [string, string, string?][]) : []),
                 ];
                 return rows.map(([l, v, customColor], i) => (
@@ -1349,7 +1359,8 @@ export function DetailPanel({
                   beerStyle: barrel.beerStyle,
                   abv: barrel.abv?.toString(),
                   volumeL: barrel.volumeL.toString(),
-                  pricePaid: barrel.pricePaid.toString(),
+                  pricePaid: barrel.pricePaidCents == null ? "" : barrel.pricePaid.toString(),
+                  openedBy: barrel.openedBy,
                 });
                 setScreen("edit");
               }}
