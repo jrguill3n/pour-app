@@ -6,6 +6,7 @@ import {
 } from "@/lib/pos/connectors/poster";
 import { saveAccount } from "@/lib/db/repositories/accounts";
 import { saveUser } from "@/lib/db/repositories/users";
+import { validatePosterOAuthState } from "@/lib/pos/oauth-state";
 
 const STATE_COOKIE = "poster_oauth_state";
 
@@ -21,10 +22,6 @@ function shouldUseSecureCookie(request: Request): boolean {
   }
 
   return new URL(request.url).protocol === "https:" || process.env.NODE_ENV === "production";
-}
-
-function canUseLocalhostStateFallback(): boolean {
-  return Boolean(process.env.APP_URL?.startsWith("http://localhost"));
 }
 
 function redirectAndClearState(request: Request, pathnameAndQuery: string) {
@@ -48,37 +45,30 @@ export async function GET(request: Request) {
   const error = searchParams.get("error");
   const state = searchParams.get("state");
 
+  const cookieStore = await cookies();
+  const expectedState = cookieStore.get(STATE_COOKIE)?.value;
+  const stateValidation = validatePosterOAuthState({
+    queryState: state,
+    cookieState: expectedState,
+    code,
+    account,
+    appUrl: process.env.APP_URL,
+    posterRedirectUri: process.env.POSTER_REDIRECT_URI,
+  });
+  const stateDiagnostics = stateValidation.diagnostics;
+
+  console.info("Poster OAuth callback query diagnostics.", stateDiagnostics);
+
   if (error) {
     return redirectAndClearState(request, `/?error=${encodeURIComponent(error)}`);
   }
 
   if (!code) {
-    console.warn("Poster OAuth callback missing code.", {
-      hasState: Boolean(state),
-    });
+    console.warn("Poster OAuth callback missing code.", stateDiagnostics);
     return redirectAndClearState(request, "/?error=missing_code");
   }
 
-  const cookieStore = await cookies();
-  const expectedState = cookieStore.get(STATE_COOKIE)?.value;
-  const usedLocalhostStateFallback = Boolean(
-    !state && expectedState && canUseLocalhostStateFallback()
-  );
-  const statesMatch = Boolean(
-    (state && expectedState && state === expectedState) || usedLocalhostStateFallback
-  );
-  const stateDiagnostics = {
-    hasStateQuery: Boolean(state),
-    hasStateCookie: Boolean(expectedState),
-    statesMatch,
-    usedLocalhostStateFallback,
-    APP_URL: process.env.APP_URL ?? null,
-    POSTER_REDIRECT_URI: process.env.POSTER_REDIRECT_URI ?? null,
-  };
-
-  console.info("Poster OAuth callback state diagnostics.", stateDiagnostics);
-
-  if (!expectedState || !statesMatch) {
+  if (!stateValidation.valid) {
     console.warn("Poster OAuth state validation failed.", stateDiagnostics);
     return redirectAndClearState(request, "/?error=invalid_oauth_state");
   }
@@ -102,7 +92,6 @@ export async function GET(request: Request) {
     ],
     grantType: "authorization_code",
     hasAccount: Boolean(account),
-    account,
   };
 
   console.info("Poster OAuth token exchange payload diagnostics.", tokenExchangePayloadDiagnostics);
@@ -126,7 +115,6 @@ export async function GET(request: Request) {
       requestContentType: tokenExchangePayloadDiagnostics.requestContentType,
       payloadKeys: tokenExchangePayloadDiagnostics.payloadKeys,
       hasAccount: Boolean(account),
-      account,
     });
 
     // Exchange code for access token
@@ -144,7 +132,6 @@ export async function GET(request: Request) {
       requestContentType: debug.requestContentType,
       payloadKeys: debug.payloadKeys,
       hasAccount: debug.hasAccount,
-      account: debug.account,
       tokenExchangeStatus: debug.status,
       responseBodyKeys: debug.bodyKeys,
       apiErrorMessage: debug.apiErrorMessage,
@@ -187,7 +174,6 @@ export async function GET(request: Request) {
         requestContentType: err.requestContentType,
         payloadKeys: err.payloadKeys,
         hasAccount: err.hasAccount,
-        account: err.account,
         tokenExchangeStatus: err.status,
         responseBodyKeys: err.bodyKeys,
         apiErrorMessage: err.apiErrorMessage,
