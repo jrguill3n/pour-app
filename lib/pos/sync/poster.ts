@@ -55,8 +55,25 @@ async function getPosterAccount(input: PosterSyncInput = {}) {
   return { ...account, accessToken: account.accessToken };
 }
 
+function logPosterSync(phase: string, details: Record<string, unknown>) {
+  console.info("Poster sync phase.", {
+    syncPhase: phase,
+    ...details,
+  });
+}
+
+function logPosterSyncError(phase: string, details: Record<string, unknown>, error: unknown) {
+  const message = error instanceof Error ? error.message : "Poster sync failed.";
+  console.error("Poster sync phase failed.", {
+    syncPhase: phase,
+    ...details,
+    sanitizedErrorMessage: message.length > 500 ? `${message.slice(0, 500)}...` : message,
+  });
+}
+
 export async function syncPosterCatalog(input: PosterSyncInput = {}): Promise<PosterSyncResult> {
   const account = await getPosterAccount(input);
+  const logContext = { merchantId: account.merchantId, posProvider: "poster", posAccountId: account.posAccountId };
 
   const context = {
     accessToken: account.accessToken,
@@ -64,34 +81,47 @@ export async function syncPosterCatalog(input: PosterSyncInput = {}): Promise<Po
     pos_account_id: account.posAccountId,
   };
 
-  const [products, locations, employees] = await Promise.all([
-    posterConnector.getProducts(context),
-    posterConnector.getLocations(context),
-    posterConnector.getEmployees(context),
-  ]);
+  try {
+    logPosterSync("catalog-fetch", logContext);
+    const [products, locations, employees] = await Promise.all([
+      posterConnector.getProducts(context),
+      posterConnector.getLocations(context),
+      posterConnector.getEmployees(context),
+    ]);
 
-  await Promise.all([
-    saveProducts({ merchantId: account.merchantId, posProvider: "poster" }, products),
-    saveLocations({ merchantId: account.merchantId, posProvider: "poster" }, locations),
-    saveEmployees({ merchantId: account.merchantId, posProvider: "poster" }, employees),
-    touchPollingLog(
-      { merchantId: account.merchantId, posProvider: "poster" },
-      "catalog",
-      { products: products.length, locations: locations.length, employees: employees.length }
-    ),
-  ]);
+    logPosterSync("catalog-save", {
+      ...logContext,
+      products: products.length,
+      locations: locations.length,
+      employees: employees.length,
+    });
+    await Promise.all([
+      saveProducts({ merchantId: account.merchantId, posProvider: "poster" }, products),
+      saveLocations({ merchantId: account.merchantId, posProvider: "poster" }, locations),
+      saveEmployees({ merchantId: account.merchantId, posProvider: "poster" }, employees),
+      touchPollingLog(
+        { merchantId: account.merchantId, posProvider: "poster" },
+        "catalog",
+        { products: products.length, locations: locations.length, employees: employees.length }
+      ),
+    ]);
 
-  return {
-    merchantId: account.merchantId,
-    posAccountId: account.posAccountId,
-    products: products.length,
-    locations: locations.length,
-    employees: employees.length,
-  };
+    return {
+      merchantId: account.merchantId,
+      posAccountId: account.posAccountId,
+      products: products.length,
+      locations: locations.length,
+      employees: employees.length,
+    };
+  } catch (error) {
+    logPosterSyncError("catalog", logContext, error);
+    throw error;
+  }
 }
 
 export async function syncPosterTransactions(input: PosterSyncInput = {}): Promise<PosterTransactionSyncResult> {
   const account = await getPosterAccount(input);
+  const logContext = { merchantId: account.merchantId, posProvider: "poster", posAccountId: account.posAccountId };
   const to = input.to ?? new Date().toISOString().slice(0, 10);
   const from = input.from ?? new Date(Date.now() - 1000 * 60 * 60 * 24 * 7).toISOString().slice(0, 10);
   const persistenceContext = { merchantId: account.merchantId, posProvider: "poster" as const };
@@ -101,61 +131,75 @@ export async function syncPosterTransactions(input: PosterSyncInput = {}): Promi
     pos_account_id: account.posAccountId,
   };
 
-  const sales = await posterConnector.getTransactions(connectorContext, { from, to });
-  await saveSales(persistenceContext, sales);
+  try {
+    logPosterSync("transactions-fetch", { ...logContext, from, to });
+    const sales = await posterConnector.getTransactions(connectorContext, { from, to });
 
-  const activeBarrels = await getActiveBarrels(persistenceContext);
-  if (activeBarrels.length > 0) {
-    const earliestOpenedAt = activeBarrels.reduce(
-      (earliest, barrel) => (barrel.openedAt < earliest ? barrel.openedAt : earliest),
-      activeBarrels[0].openedAt
-    );
-    const [cupMlByExternalProductId, storedSales] = await Promise.all([
-      getCupMlByExternalProductId(persistenceContext),
-      getSalesForConsumption(persistenceContext, earliestOpenedAt),
-    ]);
-    const totalsByBarrelId = calculateBarrelConsumption(
-      activeBarrels.map((barrel) => ({
-        id: barrel.id,
-        externalProductIds: barrel.externalProductIds,
-        opened_at: barrel.openedAt,
-      })),
-      storedSales,
-      cupMlByExternalProductId
-    );
-    console.info("Barrel consumption diagnostics.", {
-      merchantId: account.merchantId,
-      diagnostics: calculateBarrelConsumptionDiagnostics(
+    logPosterSync("transactions-save", { ...logContext, transactions: sales.length });
+    await saveSales(persistenceContext, sales);
+
+    logPosterSync("barrel-recalculation", logContext);
+    const activeBarrels = await getActiveBarrels(persistenceContext);
+    if (activeBarrels.length > 0) {
+      const earliestOpenedAt = activeBarrels.reduce(
+        (earliest, barrel) => (barrel.openedAt < earliest ? barrel.openedAt : earliest),
+        activeBarrels[0].openedAt
+      );
+      const [cupMlByExternalProductId, storedSales] = await Promise.all([
+        getCupMlByExternalProductId(persistenceContext),
+        getSalesForConsumption(persistenceContext, earliestOpenedAt),
+      ]);
+      const totalsByBarrelId = calculateBarrelConsumption(
         activeBarrels.map((barrel) => ({
           id: barrel.id,
           externalProductIds: barrel.externalProductIds,
           opened_at: barrel.openedAt,
         })),
-        storedSales
-      ).map((diagnostic) => {
-        const barrel = activeBarrels.find((item) => item.id === diagnostic.barrel_id);
-        return {
-          ...diagnostic,
-          volume_ml: barrel?.volumeMl ?? null,
-        };
-      }),
+        storedSales,
+        cupMlByExternalProductId
+      );
+      console.info("Barrel consumption diagnostics.", {
+        merchantId: account.merchantId,
+        diagnostics: calculateBarrelConsumptionDiagnostics(
+          activeBarrels.map((barrel) => ({
+            id: barrel.id,
+            externalProductIds: barrel.externalProductIds,
+            opened_at: barrel.openedAt,
+          })),
+          storedSales
+        ).map((diagnostic) => {
+          const barrel = activeBarrels.find((item) => item.id === diagnostic.barrel_id);
+          return {
+            ...diagnostic,
+            volume_ml: barrel?.volumeMl ?? null,
+          };
+        }),
+      });
+      await updateBarrelConsumption(account.merchantId, totalsByBarrelId);
+    }
+
+    logPosterSync("transactions-log", {
+      ...logContext,
+      transactions: sales.length,
+      activeBarrels: activeBarrels.length,
     });
-    await updateBarrelConsumption(account.merchantId, totalsByBarrelId);
+    await touchPollingLog(persistenceContext, "transactions", {
+      from,
+      to,
+      transactions: sales.length,
+      activeBarrels: activeBarrels.length,
+    });
+
+    return {
+      merchantId: account.merchantId,
+      posAccountId: account.posAccountId,
+      transactions: sales.length,
+      activeBarrels: activeBarrels.length,
+    };
+  } catch (error) {
+    logPosterSyncError("transactions", logContext, error);
+    throw error;
   }
-
-  await touchPollingLog(persistenceContext, "transactions", {
-    from,
-    to,
-    transactions: sales.length,
-    activeBarrels: activeBarrels.length,
-  });
-
-  return {
-    merchantId: account.merchantId,
-    posAccountId: account.posAccountId,
-    transactions: sales.length,
-    activeBarrels: activeBarrels.length,
-  };
 }
 
 export async function syncPosterManual(input: PosterSyncInput = {}): Promise<PosterManualSyncResult> {
