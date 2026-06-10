@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { getKegBoardInitialState } from "@/lib/repositories/mock-pour-repository";
 import { volumeMlToVolumeL } from "@/lib/db/repositories/operations-boundary";
+import { closedBarrelHistoryWarnings } from "@/lib/core/barrel-close";
 import type { Barrel, BarrelEditFields, Line, Template, BarConfig, MenuConfig, Product } from "@/lib/core/types";
 import type { POSProvider } from "@/lib/pos/types";
 import { remPct, yPct, yColor } from "@/lib/pour-utils";
@@ -313,7 +314,40 @@ export function KegBoard() {
     ]);
   }
 
-  function handleClose(barrelId: number, mermaMl: number, closedBy: string) {
+  async function handleClose(barrelId: number, mermaMl: number, closedBy: string) {
+    if (dataMode === "connected" && operationalContext) {
+      const currentBarrel = barrels.find((barrel) => barrel.id === barrelId);
+      if (!currentBarrel?.dbId) {
+        console.warn("Could not close local barrel because the persisted id is missing.", { barrelId });
+        return false;
+      }
+
+      const response = await fetch("/api/ops/barrels", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "close",
+          merchant_id: operationalContext.merchantId,
+          pos_provider: operationalContext.posProvider,
+          barrel_id: currentBarrel.dbId,
+          merma_ml: mermaMl,
+          closed_by: closedBy,
+        }),
+      });
+      const result = (await response.json()) as OperationalStatusResponse & { error?: string; details?: string[] };
+
+      if (!response.ok || !result.ok) {
+        console.warn("Could not close local barrel.", { error: result.error, details: result.details, barrelId: currentBarrel.dbId });
+        return false;
+      }
+
+      setLines((result.snapshot?.lines ?? []).map(lineFromOperational));
+      setBarrels((result.snapshot?.barrels ?? []).map(barrelFromOperational));
+      setProducts((result.snapshot?.mappingProducts ?? []).map(productFromOperational));
+      setOperationalContext(result.snapshot?.context ?? operationalContext);
+      return true;
+    }
+
     setBarrels((bs) =>
       bs.map((b) =>
         b.id === barrelId
@@ -321,6 +355,7 @@ export function KegBoard() {
           : b
       )
     );
+    return true;
   }
 
   async function handleEdit(barrelId: number, fields: BarrelEditFields) {
@@ -932,6 +967,17 @@ export function KegBoard() {
                   const bColor = yColor(bYield);
                   const mermaPct = (b.mermaMl / totalMl) * 100;
                   const mermaOk = mermaPct <= barConfig.maxMermaPct;
+                  const historyWarnings = closedBarrelHistoryWarnings({
+                    status: b.status,
+                    volumeMl: totalMl,
+                    mlConsumed: b.mlConsumed,
+                    mermaMl: b.mermaMl,
+                    closedAt: b.closedAt,
+                    closedBy: b.closedBy,
+                    grossRevenueCents: b.revenueBrutoCents ?? 0,
+                    discountRevenueCents: b.revenueDescuentosCents ?? 0,
+                    netRevenueCents: b.revenueNetoCents ?? 0,
+                  });
                   return (
                     <div
                       key={b.id}
@@ -960,6 +1006,11 @@ export function KegBoard() {
                           {b.voided && (
                             <div className="text-[9px] tracking-wide uppercase text-muted-foreground bg-muted rounded px-1.5 py-0.5">
                               ANULADO
+                            </div>
+                          )}
+                          {historyWarnings.length > 0 && (
+                            <div className="text-[9px] tracking-wide uppercase text-amber-600 bg-amber-50 rounded px-1.5 py-0.5">
+                              Revisar datos
                             </div>
                           )}
                         </div>

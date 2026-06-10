@@ -3,6 +3,8 @@ import { getDatabase, getDatabaseDialect } from "@/lib/db/client";
 import * as pg from "@/lib/db/schema/postgres";
 import * as sqlite from "@/lib/db/schema/sqlite";
 import { buildEnvironmentDebugSummary, isEnvironmentDebugEnabled } from "@/lib/debug/environment";
+import { isProtectedRouteAllowed } from "@/lib/security/admin";
+import type { NextRequest } from "next/server";
 
 function commitSha() {
   return process.env.VERCEL_GIT_COMMIT_SHA ??
@@ -12,10 +14,10 @@ function commitSha() {
     null;
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const enabled = isEnvironmentDebugEnabled();
 
-  if (!enabled) {
+  if (!enabled || !isProtectedRouteAllowed(request, "admin")) {
     return NextResponse.json({ ok: false, enabled: false }, { status: 404 });
   }
 

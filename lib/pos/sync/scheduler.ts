@@ -4,7 +4,7 @@ import {
   type POSAccountRecord,
 } from "@/lib/db/repositories/accounts";
 import { appendSyncFailureLog } from "@/lib/db/repositories/operations";
-import { syncPosterManual } from "@/lib/pos/sync/poster";
+import { runManualPosSync } from "@/lib/pos/sync/manual";
 import type { POSProvider } from "@/lib/pos/types";
 import {
   InMemorySyncLock,
@@ -26,11 +26,10 @@ function accountKey(account: Pick<POSAccountRecord, "posProvider" | "posAccountI
 }
 
 async function syncAccount(account: POSAccountRecord) {
-  if (account.posProvider === "poster") {
-    return syncPosterManual({ posAccountId: account.posAccountId });
-  }
-
-  throw new Error(`Auto sync is not implemented for provider ${account.posProvider}.`);
+  return runManualPosSync({
+    provider: account.posProvider as POSProvider,
+    posAccountId: account.posAccountId,
+  });
 }
 
 export async function runDueAutoSync(now = new Date()): Promise<AutoSyncRunResult> {

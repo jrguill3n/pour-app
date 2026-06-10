@@ -1,4 +1,4 @@
-import { syncPosterManual, type PosterManualSyncResult, type PosterSyncInput } from "@/lib/pos/sync/poster";
+import { syncPosterManual, type PosterManualSyncResult, type PosterSyncInput } from "./poster";
 import type { POSProvider } from "@/lib/pos/types";
 
 export interface ManualSyncInput extends PosterSyncInput {
@@ -21,8 +21,12 @@ export async function runManualPosSync(input: ManualSyncInput): Promise<ManualSy
     });
   }
 
-  return {
-    mode: "demo",
-    message: "Demo mode is already seeded; no external POS sync was run.",
-  };
+  if (input.provider === "mock") {
+    return {
+      mode: "demo",
+      message: "Demo mode is already seeded; no external POS sync was run.",
+    };
+  }
+
+  throw new Error(`Manual sync is not implemented for provider ${input.provider}.`);
 }

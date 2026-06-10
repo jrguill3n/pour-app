@@ -1,15 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runManualPosSync } from "@/lib/pos/sync/manual";
+import { isProtectedRouteAllowed } from "@/lib/security/admin";
 
 function isManualSyncAllowed(request: NextRequest): boolean {
-  if (process.env.NODE_ENV !== "production") {
-    return true;
-  }
-
-  const expectedSecret = process.env.DEV_SYNC_SECRET;
-  const actualSecret = request.headers.get("x-dev-sync-secret") ?? request.nextUrl.searchParams.get("secret");
-
-  return Boolean(expectedSecret && actualSecret && expectedSecret === actualSecret);
+  return isProtectedRouteAllowed(request, "admin");
 }
 
 async function handleManualSync(request: NextRequest) {
