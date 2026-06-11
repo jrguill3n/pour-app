@@ -149,6 +149,38 @@ function barrelEntityId(context: OperationalContext, lineId: number, openedAt: D
   return `${context.posProvider}:${context.merchantId}:barrel:${lineId}:${openedAt.getTime()}`;
 }
 
+let postgresBarrelInsertSchemaChecked = false;
+
+async function ensurePostgresBarrelInsertSchema() {
+  if (postgresBarrelInsertSchemaChecked) return;
+
+  const runtime = getDatabase();
+
+  if (runtime.dialect !== "postgres") {
+    postgresBarrelInsertSchemaChecked = true;
+    return;
+  }
+
+  await runtime.db.execute(sql`
+    do $$
+    begin
+      if exists (
+        select 1
+        from information_schema.columns
+        where table_schema = 'public'
+          and table_name = 'barrels'
+          and column_name = 'external_product_ids'
+          and udt_name = '_uuid'
+      ) then
+        alter table public.barrels
+          alter column external_product_ids type text[]
+          using external_product_ids::text[];
+      end if;
+    end $$;
+  `);
+  postgresBarrelInsertSchemaChecked = true;
+}
+
 async function ensureDefaultLines(context: OperationalContext) {
   const runtime = getDatabase();
   const now = new Date();
@@ -635,6 +667,8 @@ export async function createOperationalBarrel(
   await ensureDefaultLines(context);
 
   if (runtime.dialect === "postgres") {
+    await ensurePostgresBarrelInsertSchema();
+
     const existing = await runtime.db
       .select({ id: pg.barrels.id })
       .from(pg.barrels)
