@@ -53,6 +53,15 @@ type BarrelRoutePhase =
   | "response-serialization";
 
 function sanitizedErrorMessage(error: unknown): string {
+  const cause = error instanceof Error ? error.cause : undefined;
+  if (cause instanceof Error && cause.message) return cause.message.slice(0, 500);
+  if (cause && typeof cause === "object") {
+    const causeRecord = cause as Record<string, unknown>;
+    const detail = typeof causeRecord.detail === "string" ? causeRecord.detail : null;
+    const message = typeof causeRecord.message === "string" ? causeRecord.message : null;
+    const code = typeof causeRecord.code === "string" ? causeRecord.code : null;
+    if (detail || message || code) return [code, message, detail].filter(Boolean).join(" - ").slice(0, 500);
+  }
   if (error instanceof Error) return error.message.slice(0, 500);
   return String(error ?? "Unknown error").slice(0, 500);
 }
