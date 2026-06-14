@@ -11,7 +11,8 @@ Pour treats Poster as read-only. All barrel state, mappings, sync logs, and reve
 - Confirm products, locations, employees, and transactions sync successfully.
 - Configure eligible draft categories for mapping:
   - `DRAFT NACIONAL`
-  - `DRAFT INTERNACIONAL`
+  - `DRAFT IMPORTADO`
+- Insurgente eligible categories are `DRAFT NACIONAL` and `DRAFT IMPORTADO`.
 - Confirm only draft candidates appear in Create Keg and barrel mapping selectors.
 
 ## Opening Barrels
@@ -55,4 +56,3 @@ Pour treats Poster as read-only. All barrel state, mappings, sync logs, and reve
 - Investigate any `Revisar datos` warning.
 - Confirm closed barrel history shows opened/closed dates, liters consumed, gross, discounts, net, yield, and merma.
 - Do not use demo seed/reset commands on production data.
-
