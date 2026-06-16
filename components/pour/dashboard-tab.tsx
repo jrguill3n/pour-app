@@ -83,7 +83,7 @@ export function DashboardTab({
           closed.reduce((s, b) => {
             const days =
               (new Date(b.closedAt!).getTime() -
-                new Date(b.openedAt).getTime()) /
+                new Date(b.openedAt ?? b.closedAt!).getTime()) /
               (1000 * 60 * 60 * 24);
             return s + days;
           }, 0) / totalBarrels

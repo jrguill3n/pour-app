@@ -10,7 +10,11 @@ import {
   findMappedProductsMissingCupMl,
   hasConfiguredDraftCategories,
   hasRealConnectedAccount,
+  isSyncableActiveBarrel,
   normalizeOperationalBarrelEdit,
+  reserveActivationErrors,
+  reserveActivatedAuditEvent,
+  reserveCreatedAuditEvent,
   occupiedLineNumbers,
   volumeLToVolumeMl,
   volumeMlToVolumeL,
@@ -132,6 +136,26 @@ describe("operational demo/real boundary", () => {
     expect(canOpenLine(2, lines, barrels)).toBe(true);
   });
 
+  it("blocks reserve activation to an occupied active line", () => {
+    const lines = defaultOperationalLines(3);
+    const barrels = [
+      { lineId: 1, status: "active" },
+      { lineId: 2, status: "reserve" },
+    ];
+
+    expect(canOpenLine(1, lines, barrels)).toBe(false);
+    expect(canOpenLine(2, lines, barrels)).toBe(true);
+    expect(canOpenLine(3, lines, barrels)).toBe(true);
+  });
+
+  it("keeps reserve barrels out of syncable active barrel recalculation", () => {
+    expect(isSyncableActiveBarrel({ status: "reserve", lineId: null, openedAt: null })).toBe(false);
+    expect(isSyncableActiveBarrel({ status: "active", lineId: null, openedAt: new Date() })).toBe(false);
+    expect(isSyncableActiveBarrel({ status: "active", lineId: 1, openedAt: null })).toBe(false);
+    expect(isSyncableActiveBarrel({ status: "closed", lineId: 1, openedAt: new Date() })).toBe(false);
+    expect(isSyncableActiveBarrel({ status: "active", lineId: 1, openedAt: new Date() })).toBe(true);
+  });
+
   it("lists only empty destination lines when moving an active barrel", () => {
     const lines = defaultOperationalLines(4);
     const barrels = [
@@ -160,7 +184,7 @@ describe("operational demo/real boundary", () => {
       activeBarrelMovedAuditEvent({
         fromLine: 1,
         toLine: 7,
-        movedBy: "Carlos V.",
+        user: "Carlos V.",
         movedAt: new Date("2026-06-16T02:30:00.000Z"),
       })
     ).toEqual({
@@ -168,9 +192,54 @@ describe("operational demo/real boundary", () => {
       from_line: 1,
       to_line: 7,
       timestamp: "2026-06-16T02:30:00.000Z",
-      moved_by: "Carlos V.",
+      user: "Carlos V.",
       message: "Moved from Line 1 to Line 7 by Carlos V. at 2026-06-16T02:30:00.000Z",
     });
+  });
+
+  it("records reserve lifecycle audit metadata", () => {
+    expect(
+      reserveCreatedAuditEvent({
+        user: "Carlos V.",
+        createdAt: new Date("2026-06-16T02:25:00.000Z"),
+      })
+    ).toEqual({
+      event: "reserve_created",
+      from_line: null,
+      to_line: null,
+      timestamp: "2026-06-16T02:25:00.000Z",
+      user: "Carlos V.",
+      message: "Reserve barrel created by Carlos V. at 2026-06-16T02:25:00.000Z",
+    });
+
+    expect(
+      reserveActivatedAuditEvent({
+        toLine: 3,
+        user: "Carlos V.",
+        activatedAt: new Date("2026-06-16T02:30:00.000Z"),
+      })
+    ).toMatchObject({
+      event: "reserve_activated",
+      from_line: null,
+      to_line: 3,
+      user: "Carlos V.",
+    });
+  });
+
+  it("blocks reserve activation without product mapping or cup_ml", () => {
+    expect(reserveActivationErrors({ externalProductIds: [] }, [])).toEqual(["linked_product_required"]);
+    expect(
+      reserveActivationErrors(
+        { externalProductIds: ["pinta-lupulosa"] },
+        [{ externalProductId: "pinta-lupulosa", cupMl: null }]
+      )
+    ).toEqual(["cup_ml_required"]);
+    expect(
+      reserveActivationErrors(
+        { externalProductIds: ["pinta-lupulosa"] },
+        [{ externalProductId: "pinta-lupulosa", cupMl: 355 }]
+      )
+    ).toEqual([]);
   });
 
   it("round-trips a 20L barrel as 20000ml for persistence and rendering", () => {

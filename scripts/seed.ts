@@ -102,7 +102,7 @@ async function main() {
         mlConsumed: barrel.mlConsumed,
         mermaMl: barrel.mermaMl,
         status: barrel.status,
-        openedAt: new Date(barrel.openedAt),
+        openedAt: barrel.openedAt ? new Date(barrel.openedAt) : null,
         openedBy: barrel.openedBy,
         closedAt: barrel.closedAt ? new Date(barrel.closedAt) : null,
         closedBy: barrel.closedBy,

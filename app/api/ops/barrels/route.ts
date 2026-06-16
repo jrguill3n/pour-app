@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
+  activateReserveOperationalBarrel,
   closeOperationalBarrel,
   createOperationalBarrel,
+  createReserveOperationalBarrel,
   getOperationalSnapshot,
   moveOperationalBarrel,
   saveProductCupMlMapping,
@@ -12,6 +14,7 @@ import { findMappedProductsMissingCupMl } from "@/lib/db/repositories/operations
 import type { POSProvider } from "@/lib/pos/types";
 
 interface CreateBarrelPayload {
+  status?: "active" | "reserve";
   merchant_id?: string;
   pos_provider?: POSProvider;
   line_id?: number;
@@ -23,15 +26,17 @@ interface CreateBarrelPayload {
   volume_l?: number;
   price_paid?: number;
   opened_by?: string | null;
+  notes?: string | null;
 }
 
 interface UpdateBarrelPayload {
-  action?: "update" | "close" | "move";
+  action?: "update" | "close" | "move" | "activate";
   merchant_id?: string;
   pos_provider?: POSProvider;
   barrel_id?: string;
   destination_line_id?: number;
   moved_by?: string | null;
+  activated_by?: string | null;
   brand?: string | null;
   group_name?: string | null;
   beer_style?: string | null;
@@ -51,6 +56,8 @@ type BarrelRoutePhase =
   | "line-lookup"
   | "product-mapping-validation"
   | "barrel-insert"
+  | "reserve-insert"
+  | "reserve-activate"
   | "barrel-close"
   | "barrel-move"
   | "barrel-update"
@@ -107,15 +114,10 @@ export async function POST(request: NextRequest) {
   try {
     body = (await request.json().catch(() => null)) as CreateBarrelPayload | null;
 
-    if (!body?.line_id || !body.group_name || !body.volume_l || !body.price_paid) {
-      return NextResponse.json({ ok: false, error: "line_id, group_name, volume_l, and price_paid are required." }, { status: 400 });
+    if (!body) {
+      return NextResponse.json({ ok: false, error: "Request body is required." }, { status: 400 });
     }
-    const payload = body as CreateBarrelPayload & {
-      line_id: number;
-      group_name: string;
-      volume_l: number;
-      price_paid: number;
-    };
+    const payload = body;
 
     phase = "merchant-account-context";
     const snapshot = await getOperationalSnapshot(payload.pos_provider);
@@ -124,6 +126,29 @@ export async function POST(request: NextRequest) {
       posProvider: payload.pos_provider ?? snapshot.context.posProvider,
     };
     const externalProductIds = payload.external_product_ids ?? [];
+    const isReserve = payload.status === "reserve";
+
+    if (isReserve) {
+      phase = "reserve-insert";
+      const nextSnapshot = await createReserveOperationalBarrel(context, {
+        brand: payload.brand ?? null,
+        groupName: payload.group_name ?? null,
+        beerStyle: payload.beer_style ?? null,
+        abv: payload.abv ?? null,
+        externalProductIds,
+        volumeL: payload.volume_l ?? null,
+        pricePaid: payload.price_paid ?? null,
+        createdBy: payload.opened_by ?? null,
+        notes: payload.notes ?? null,
+      });
+
+      phase = "response-serialization";
+      return NextResponse.json({ ok: true, snapshot: nextSnapshot });
+    }
+
+    if (!payload.line_id || !payload.group_name || !payload.volume_l || !payload.price_paid) {
+      return NextResponse.json({ ok: false, error: "line_id, group_name, volume_l, and price_paid are required." }, { status: 400 });
+    }
 
     phase = "line-lookup";
     const lineExists = snapshot.lines.some((line) => line.lineNumber === payload.line_id);
@@ -257,10 +282,54 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ ok: true, snapshot: nextSnapshot });
     }
 
+    if (payload.action === "activate") {
+      phase = "request-validation";
+      if (typeof payload.destination_line_id !== "number" || !Number.isInteger(payload.destination_line_id) || payload.destination_line_id <= 0) {
+        return NextResponse.json({ ok: false, error: "destination_line_id is required." }, { status: 400 });
+      }
+
+      if (!payload.activated_by?.trim()) {
+        return NextResponse.json({ ok: false, error: "activated_by is required." }, { status: 400 });
+      }
+
+      phase = "product-mapping-validation";
+      const externalProductIds = knownBarrel.externalProductIds ?? [];
+      if (externalProductIds.length === 0) {
+        return NextResponse.json(
+          { ok: false, error: "Add at least one linked product before activating a reserve barrel." },
+          { status: 400 }
+        );
+      }
+
+      const missingCupMl = findMappedProductsMissingCupMl(externalProductIds, snapshot.products, {});
+      if (missingCupMl.length > 0) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: "cup_ml is required for every linked product before activating a reserve barrel.",
+            missing_external_product_ids: missingCupMl,
+          },
+          { status: 400 }
+        );
+      }
+
+      phase = "reserve-activate";
+      const nextSnapshot = await activateReserveOperationalBarrel(context, payload.barrel_id, {
+        destinationLineId: payload.destination_line_id,
+        openedBy: payload.activated_by,
+      });
+
+      phase = "response-serialization";
+      return NextResponse.json({ ok: true, snapshot: nextSnapshot });
+    }
+
     phase = "product-mapping-validation";
     const externalProductIds = payload.external_product_ids ?? knownBarrel.externalProductIds;
     const cupMlByExternalProductId = payload.cup_ml_by_external_product_id ?? {};
-    const missingCupMl = findMappedProductsMissingCupMl(externalProductIds, snapshot.products, cupMlByExternalProductId);
+    const missingCupMl =
+      knownBarrel.status === "reserve"
+        ? []
+        : findMappedProductsMissingCupMl(externalProductIds, snapshot.products, cupMlByExternalProductId);
 
     if (missingCupMl.length > 0) {
       return NextResponse.json(
@@ -323,6 +392,14 @@ export async function PATCH(request: NextRequest) {
 
     if (error instanceof Error && error.message === "moved_by_required") {
       return NextResponse.json({ ok: false, error: "moved_by is required." }, { status: 400 });
+    }
+
+    if (error instanceof Error && error.message === "opened_by_required") {
+      return NextResponse.json({ ok: false, error: "opened_by is required." }, { status: 400 });
+    }
+
+    if (error instanceof Error && error.message === "barrel_activate_not_reserve") {
+      return NextResponse.json({ ok: false, error: "Only reserve barrels can be activated." }, { status: 400 });
     }
 
     logBarrelRouteFailure("Update local barrel failed.", error, {
