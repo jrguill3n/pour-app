@@ -50,6 +50,7 @@ interface DetailPanelProps {
   ) => void;
   onClose: (barrelId: number, mermaMl: number, closedBy: string) => void | Promise<boolean | void>;
   onEdit: (barrelId: number, fields: BarrelEditFields) => void | Promise<boolean | void>;
+  onMove: (barrelId: number, destinationLineId: number, movedBy: string) => void | Promise<boolean | void>;
   onDeselect: () => void;
   onSaveTemplate: (
     data: {
@@ -64,6 +65,7 @@ interface DetailPanelProps {
   ) => void;
   barConfig: BarConfig;
   allBarrels: Barrel[];
+  lines: Line[];
   darkMode?: boolean;
 }
 
@@ -76,14 +78,18 @@ export function DetailPanel({
   onOpen,
   onClose,
   onEdit,
+  onMove,
   onDeselect,
   onSaveTemplate,
   barConfig,
   allBarrels,
+  lines,
   darkMode = false,
 }: DetailPanelProps) {
-  const [screen, setScreen] = useState<"view" | "open" | "close" | "edit">("view");
+  const [screen, setScreen] = useState<"view" | "open" | "close" | "edit" | "move">("view");
   const [openMode, setOpenMode] = useState<"template" | "manual">("template");
+  const [moveLineId, setMoveLineId] = useState<number | null>(null);
+  const [moveError, setMoveError] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<{
     brand?: string;
     group?: string;
@@ -170,6 +176,14 @@ export function DetailPanel({
   const getProds = (ids: string[]) => products.filter((p) => ids.includes(p.external_product_id));
   const selectedProducts = getProds(form.external_product_ids);
   const selectedProductsHaveCupMl = selectedProducts.every((p) => Number.isFinite(p.cupMl) && p.cupMl > 0);
+  const occupiedActiveLineIds = useMemo(
+    () => new Set((allBarrels || []).filter((b) => b.status === "active").map((b) => b.lineId)),
+    [allBarrels]
+  );
+  const availableMoveLines = useMemo(
+    () => lines.filter((item) => item.id !== line.id && !occupiedActiveLineIds.has(item.id)),
+    [line.id, lines, occupiedActiveLineIds]
+  );
 
   function handleOpenFromTemplate() {
     if (!selectedTemplate) return;
@@ -839,6 +853,125 @@ export function DetailPanel({
     );
   }
 
+  // MOVE SCREEN
+  if (screen === "move" && barrel) {
+    return (
+      <div
+        className="p-5 h-full overflow-y-auto"
+        style={{ background: darkMode ? "#0f1117" : "#fff" }}
+      >
+        <div className="flex items-center gap-2.5 mb-5">
+          <button
+            onClick={() => {
+              setMoveError(null);
+              setScreen("view");
+            }}
+            className="text-muted-foreground hover:text-foreground text-lg"
+          >
+            ←
+          </button>
+          <div>
+            <div className="text-[15px] font-bold text-foreground">
+              Mover de línea
+            </div>
+            <div className="text-xs text-muted-foreground">
+              Línea {String(line.id).padStart(2, "0")} · {barrel.group}
+            </div>
+          </div>
+        </div>
+
+        <div
+          className="rounded-lg p-2.5 mb-4 flex gap-2"
+          style={{
+            background: darkMode ? "#151820" : "#f9fafb",
+            border: `1.5px solid ${darkMode ? "#2a3050" : "#e5e7eb"}`,
+          }}
+        >
+          <span>↔</span>
+          <span
+            className="text-xs"
+            style={{ color: darkMode ? "#94a3b8" : "#374151" }}
+          >
+            El barril conserva volumen consumido, revenue, descuentos, fecha de apertura,
+            costo y productos vinculados.
+          </span>
+        </div>
+
+        <div className="mb-3">
+          <label style={lb}>Línea destino</label>
+          {availableMoveLines.length === 0 ? (
+            <div
+              className="rounded-lg px-3 py-3 text-xs"
+              style={{
+                background: darkMode ? "#151820" : "#fffbeb",
+                border: `1.5px solid ${darkMode ? "#2a3050" : "#fde68a"}`,
+                color: darkMode ? "#94a3b8" : "#92400e",
+              }}
+            >
+              No hay líneas vacías disponibles.
+            </div>
+          ) : (
+            <div className="grid grid-cols-3 gap-2">
+              {availableMoveLines.map((item) => {
+                const selected = moveLineId === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => {
+                      setMoveLineId(item.id);
+                      setMoveError(null);
+                    }}
+                    className="py-2 rounded-lg text-xs font-semibold"
+                    style={{
+                      background: selected ? "#fff1f2" : darkMode ? "#151820" : "#fff",
+                      border: `1.5px solid ${selected ? "#f43f5e" : darkMode ? "#2a3050" : "#e5e7eb"}`,
+                      color: selected ? "#f43f5e" : darkMode ? "#94a3b8" : "#374151",
+                    }}
+                  >
+                    {String(item.id).padStart(2, "0")}
+                    {item.note ? <span className="block text-[9px] font-normal">{item.note}</span> : null}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {moveError && (
+          <div className="mb-3 text-xs text-red-600">
+            {moveError}
+          </div>
+        )}
+
+        <button
+          disabled={!moveLineId}
+          onClick={() => {
+            if (!moveLineId) return;
+            void Promise.resolve(onMove(barrel.id, moveLineId, currentEmployee)).then((ok) => {
+              if (ok === false) {
+                setMoveError("No se pudo mover el barril. Revisa que la línea destino siga vacía.");
+                return;
+              }
+              setMoveError(null);
+              setMoveLineId(null);
+              setScreen("view");
+            });
+          }}
+          className="w-full py-3 rounded-lg text-sm font-semibold"
+          style={{
+            background: moveLineId
+              ? "linear-gradient(135deg,#9f1239,#f43f5e)"
+              : "#f3f4f6",
+            color: moveLineId ? "#fff" : "#9ca3af",
+            cursor: moveLineId ? "pointer" : "default",
+          }}
+        >
+          Mover a línea {moveLineId ? String(moveLineId).padStart(2, "0") : ""}
+        </button>
+      </div>
+    );
+  }
+
   // CLOSE SCREEN
   if (screen === "close" && barrel) {
     const mermaActualMl = mermaL ? parseFloat(mermaL) * 1000 : 0;
@@ -1384,6 +1517,21 @@ export function DetailPanel({
               }}
             >
               Editar
+            </button>
+            <button
+              onClick={() => {
+                setMoveLineId(null);
+                setMoveError(null);
+                setScreen("move");
+              }}
+              className="flex-1 py-3 rounded-lg text-xs font-medium"
+              style={{
+                background: darkMode ? "#151820" : "#fff",
+                border: `1.5px solid ${darkMode ? "#2a3050" : "#e5e7eb"}`,
+                color: darkMode ? "#475569" : "#6b7280",
+              }}
+            >
+              Mover de línea
             </button>
             <button
               onClick={() => setScreen("close")}

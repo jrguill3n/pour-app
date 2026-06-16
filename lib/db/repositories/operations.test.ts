@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  activeBarrelMovedAuditEvent,
+  availableMoveDestinationLines,
   canOpenLine,
   chooseContext,
   DEMO_CONTEXT,
@@ -128,6 +130,47 @@ describe("operational demo/real boundary", () => {
     expect(occupiedLineNumbers(barrels)).toEqual([1]);
     expect(canOpenLine(1, lines, barrels)).toBe(false);
     expect(canOpenLine(2, lines, barrels)).toBe(true);
+  });
+
+  it("lists only empty destination lines when moving an active barrel", () => {
+    const lines = defaultOperationalLines(4);
+    const barrels = [
+      { lineId: 1, status: "active" },
+      { lineId: 3, status: "active" },
+      { lineId: 4, status: "closed" },
+    ];
+
+    expect(availableMoveDestinationLines(1, lines, barrels)).toEqual([
+      { lineNumber: 2, note: "" },
+      { lineNumber: 4, note: "" },
+    ]);
+  });
+
+  it("does not offer the source line as a move destination even when it is the only active line", () => {
+    const lines = defaultOperationalLines(2);
+    const barrels = [{ lineId: 1, status: "active" }];
+
+    expect(availableMoveDestinationLines(1, lines, barrels)).toEqual([
+      { lineNumber: 2, note: "" },
+    ]);
+  });
+
+  it("records active barrel move audit metadata with source, destination, and timestamp", () => {
+    expect(
+      activeBarrelMovedAuditEvent({
+        fromLine: 1,
+        toLine: 7,
+        movedBy: "Carlos V.",
+        movedAt: new Date("2026-06-16T02:30:00.000Z"),
+      })
+    ).toEqual({
+      event: "active_barrel_moved",
+      from_line: 1,
+      to_line: 7,
+      timestamp: "2026-06-16T02:30:00.000Z",
+      moved_by: "Carlos V.",
+      message: "Moved from Line 1 to Line 7 by Carlos V. at 2026-06-16T02:30:00.000Z",
+    });
   });
 
   it("round-trips a 20L barrel as 20000ml for persistence and rendering", () => {

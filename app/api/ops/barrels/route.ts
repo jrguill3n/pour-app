@@ -3,6 +3,7 @@ import {
   closeOperationalBarrel,
   createOperationalBarrel,
   getOperationalSnapshot,
+  moveOperationalBarrel,
   saveProductCupMlMapping,
   updateOperationalBarrel,
   type OperationalContext,
@@ -25,10 +26,12 @@ interface CreateBarrelPayload {
 }
 
 interface UpdateBarrelPayload {
-  action?: "update" | "close";
+  action?: "update" | "close" | "move";
   merchant_id?: string;
   pos_provider?: POSProvider;
   barrel_id?: string;
+  destination_line_id?: number;
+  moved_by?: string | null;
   brand?: string | null;
   group_name?: string | null;
   beer_style?: string | null;
@@ -49,6 +52,7 @@ type BarrelRoutePhase =
   | "product-mapping-validation"
   | "barrel-insert"
   | "barrel-close"
+  | "barrel-move"
   | "barrel-update"
   | "response-serialization";
 
@@ -233,6 +237,26 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ ok: true, snapshot: nextSnapshot });
     }
 
+    if (payload.action === "move") {
+      phase = "request-validation";
+      if (typeof payload.destination_line_id !== "number" || !Number.isInteger(payload.destination_line_id) || payload.destination_line_id <= 0) {
+        return NextResponse.json({ ok: false, error: "destination_line_id is required." }, { status: 400 });
+      }
+
+      if (!payload.moved_by?.trim()) {
+        return NextResponse.json({ ok: false, error: "moved_by is required." }, { status: 400 });
+      }
+
+      phase = "barrel-move";
+      const nextSnapshot = await moveOperationalBarrel(context, payload.barrel_id, {
+        destinationLineId: payload.destination_line_id,
+        movedBy: payload.moved_by,
+      });
+
+      phase = "response-serialization";
+      return NextResponse.json({ ok: true, snapshot: nextSnapshot });
+    }
+
     phase = "product-mapping-validation";
     const externalProductIds = payload.external_product_ids ?? knownBarrel.externalProductIds;
     const cupMlByExternalProductId = payload.cup_ml_by_external_product_id ?? {};
@@ -279,6 +303,26 @@ export async function PATCH(request: NextRequest) {
 
     if (error instanceof Error && error.message === "barrel_not_found") {
       return NextResponse.json({ ok: false, error: "Barrel not found for this merchant." }, { status: 404 });
+    }
+
+    if (error instanceof Error && error.message === "barrel_move_inactive") {
+      return NextResponse.json({ ok: false, error: "Only active barrels can be moved." }, { status: 400 });
+    }
+
+    if (error instanceof Error && error.message === "barrel_move_same_line") {
+      return NextResponse.json({ ok: false, error: "Choose a different destination line." }, { status: 400 });
+    }
+
+    if (error instanceof Error && error.message === "destination_line_not_found") {
+      return NextResponse.json({ ok: false, error: "Destination line is not configured for this merchant." }, { status: 404 });
+    }
+
+    if (error instanceof Error && error.message === "destination_line_occupied") {
+      return NextResponse.json({ ok: false, error: "Destination line already has an active barrel." }, { status: 409 });
+    }
+
+    if (error instanceof Error && error.message === "moved_by_required") {
+      return NextResponse.json({ ok: false, error: "moved_by is required." }, { status: 400 });
     }
 
     logBarrelRouteFailure("Update local barrel failed.", error, {

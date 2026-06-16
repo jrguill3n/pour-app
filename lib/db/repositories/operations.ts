@@ -4,6 +4,7 @@ import * as pg from "@/lib/db/schema/postgres";
 import * as sqlite from "@/lib/db/schema/sqlite";
 import type { POSProvider } from "@/lib/pos/types";
 import {
+  activeBarrelMovedAuditEvent,
   chooseContext,
   DEMO_CONTEXT,
   defaultOperationalLines,
@@ -631,6 +632,33 @@ export interface CloseOperationalBarrelInput {
   closedAt?: Date;
 }
 
+export interface MoveOperationalBarrelInput {
+  destinationLineId: number;
+  movedBy: string;
+  movedAt?: Date;
+}
+
+function rawRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? { ...(value as Record<string, unknown>) }
+    : {};
+}
+
+function appendMoveEvent(
+  raw: unknown,
+  event: ReturnType<typeof activeBarrelMovedAuditEvent>
+) {
+  const nextRaw = rawRecord(raw);
+  const existingEvents = Array.isArray(nextRaw.move_events) ? nextRaw.move_events : [];
+
+  return {
+    ...nextRaw,
+    source: nextRaw.source ?? "pour-local",
+    move_events: [...existingEvents, event],
+    last_move_event: event,
+  };
+}
+
 export async function createOperationalBarrel(
   context: OperationalContext,
   input: CreateOperationalBarrelInput
@@ -755,6 +783,165 @@ export async function updateOperationalBarrel(
   await runtime.db
     .update(sqlite.barrels)
     .set(values)
+    .where(
+      and(
+        eq(sqlite.barrels.id, barrelId),
+        eq(sqlite.barrels.merchantId, context.merchantId),
+        eq(sqlite.barrels.posProvider, context.posProvider)
+      )
+    );
+  return getOperationalSnapshot(context.posProvider);
+}
+
+export async function moveOperationalBarrel(
+  context: OperationalContext,
+  barrelId: string,
+  input: MoveOperationalBarrelInput
+): Promise<OperationalSnapshot> {
+  const runtime = getDatabase();
+  const movedAt = input.movedAt ?? new Date();
+  const destinationLineId = input.destinationLineId;
+  const movedBy = input.movedBy.trim();
+
+  if (!Number.isInteger(destinationLineId) || destinationLineId <= 0) {
+    throw new Error("invalid_destination_line");
+  }
+
+  if (!movedBy) {
+    throw new Error("moved_by_required");
+  }
+
+  await ensureDefaultLines(context);
+
+  if (runtime.dialect === "postgres") {
+    const [current] = await runtime.db
+      .select()
+      .from(pg.barrels)
+      .where(
+        and(
+          eq(pg.barrels.id, barrelId),
+          eq(pg.barrels.merchantId, context.merchantId),
+          eq(pg.barrels.posProvider, context.posProvider)
+        )
+      )
+      .limit(1);
+
+    if (!current) throw new Error("barrel_not_found");
+    if (current.status !== "active") throw new Error("barrel_move_inactive");
+    if (current.lineId === destinationLineId) throw new Error("barrel_move_same_line");
+
+    const destinationLine = await runtime.db
+      .select({ id: pg.lines.id })
+      .from(pg.lines)
+      .where(
+        and(
+          eq(pg.lines.merchantId, context.merchantId),
+          eq(pg.lines.posProvider, context.posProvider),
+          eq(pg.lines.lineNumber, destinationLineId)
+        )
+      )
+      .limit(1);
+
+    if (destinationLine.length === 0) throw new Error("destination_line_not_found");
+
+    const occupied = await runtime.db
+      .select({ id: pg.barrels.id })
+      .from(pg.barrels)
+      .where(
+        and(
+          eq(pg.barrels.merchantId, context.merchantId),
+          eq(pg.barrels.posProvider, context.posProvider),
+          eq(pg.barrels.lineId, destinationLineId),
+          eq(pg.barrels.status, "active")
+        )
+      )
+      .limit(1);
+
+    if (occupied.length > 0) throw new Error("destination_line_occupied");
+
+    const event = activeBarrelMovedAuditEvent({
+      fromLine: current.lineId,
+      toLine: destinationLineId,
+      movedBy,
+      movedAt,
+    });
+
+    await runtime.db
+      .update(pg.barrels)
+      .set({
+        lineId: destinationLineId,
+        raw: appendMoveEvent(current.raw, event),
+        updatedAt: movedAt,
+      })
+      .where(
+        and(
+          eq(pg.barrels.id, barrelId),
+          eq(pg.barrels.merchantId, context.merchantId),
+          eq(pg.barrels.posProvider, context.posProvider)
+        )
+      );
+    return getOperationalSnapshot(context.posProvider);
+  }
+
+  const [current] = await runtime.db
+    .select()
+    .from(sqlite.barrels)
+    .where(
+      and(
+        eq(sqlite.barrels.id, barrelId),
+        eq(sqlite.barrels.merchantId, context.merchantId),
+        eq(sqlite.barrels.posProvider, context.posProvider)
+      )
+    )
+    .limit(1);
+
+  if (!current) throw new Error("barrel_not_found");
+  if (current.status !== "active") throw new Error("barrel_move_inactive");
+  if (current.lineId === destinationLineId) throw new Error("barrel_move_same_line");
+
+  const destinationLine = await runtime.db
+    .select({ id: sqlite.lines.id })
+    .from(sqlite.lines)
+    .where(
+      and(
+        eq(sqlite.lines.merchantId, context.merchantId),
+        eq(sqlite.lines.posProvider, context.posProvider),
+        eq(sqlite.lines.lineNumber, destinationLineId)
+      )
+    )
+    .limit(1);
+
+  if (destinationLine.length === 0) throw new Error("destination_line_not_found");
+
+  const occupied = await runtime.db
+    .select({ id: sqlite.barrels.id })
+    .from(sqlite.barrels)
+    .where(
+      and(
+        eq(sqlite.barrels.merchantId, context.merchantId),
+        eq(sqlite.barrels.posProvider, context.posProvider),
+        eq(sqlite.barrels.lineId, destinationLineId),
+        eq(sqlite.barrels.status, "active")
+      )
+    )
+    .limit(1);
+
+  if (occupied.length > 0) throw new Error("destination_line_occupied");
+
+  const event = activeBarrelMovedAuditEvent({
+    fromLine: current.lineId,
+    toLine: destinationLineId,
+    movedBy,
+    movedAt,
+  });
+
+  await runtime.db
+    .update(sqlite.barrels)
+    .set({
+      lineId: destinationLineId,
+      raw: appendMoveEvent(current.raw, event),
+      updatedAt: movedAt,
+    })
     .where(
       and(
         eq(sqlite.barrels.id, barrelId),
