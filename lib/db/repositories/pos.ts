@@ -1,6 +1,7 @@
 import { eq, and, sql, gte } from "drizzle-orm";
 import { defaultDraftCupMlForProduct } from "@/lib/core/serving-sizes";
 import { getDatabase } from "@/lib/db/client";
+import { isSyncableActiveBarrel } from "@/lib/db/repositories/operations-boundary";
 import * as pg from "@/lib/db/schema/postgres";
 import * as sqlite from "@/lib/db/schema/sqlite";
 import type {
@@ -747,44 +748,52 @@ export async function getActiveBarrels(context: PersistenceContext): Promise<Act
       .select()
       .from(pg.barrels)
       .where(and(eq(pg.barrels.merchantId, context.merchantId), eq(pg.barrels.status, "active")));
-    return rows.map((row) => ({
-      id: row.id,
-      merchantId: row.merchantId,
-      posProvider: row.posProvider,
-      locationId: row.locationId,
-      lineId: row.lineId,
-      kegId: row.kegId,
-      brand: row.brand,
-      groupName: row.groupName,
-      externalProductIds: row.externalProductIds,
-      volumeMl: row.volumeMl,
-      pricePaidCents: row.pricePaidCents,
-      mlConsumed: row.mlConsumed,
-      mermaMl: row.mermaMl,
-      status: row.status,
-      openedAt: row.openedAt,
-    }));
+    return rows.flatMap((row) =>
+      isSyncableActiveBarrel(row)
+        ? [{
+            id: row.id,
+            merchantId: row.merchantId,
+            posProvider: row.posProvider,
+            locationId: row.locationId,
+            lineId: row.lineId,
+            kegId: row.kegId,
+            brand: row.brand,
+            groupName: row.groupName,
+            externalProductIds: row.externalProductIds,
+            volumeMl: row.volumeMl,
+            pricePaidCents: row.pricePaidCents,
+            mlConsumed: row.mlConsumed,
+            mermaMl: row.mermaMl,
+            status: row.status,
+            openedAt: row.openedAt,
+          }]
+        : []
+    );
   }
 
   const rows = await runtime.db
     .select()
     .from(sqlite.barrels)
     .where(and(eq(sqlite.barrels.merchantId, context.merchantId), eq(sqlite.barrels.status, "active")));
-  return rows.map((row) => ({
-    id: row.id,
-    merchantId: row.merchantId,
-    posProvider: row.posProvider,
-    locationId: row.locationId,
-    lineId: row.lineId,
-    kegId: row.kegId,
-    brand: row.brand,
-    groupName: row.groupName,
-    externalProductIds: row.externalProductIds ?? null,
-    volumeMl: row.volumeMl,
-    pricePaidCents: row.pricePaidCents,
-    mlConsumed: row.mlConsumed,
-    mermaMl: row.mermaMl,
-    status: row.status,
-    openedAt: row.openedAt,
-  }));
+  return rows.flatMap((row) =>
+    isSyncableActiveBarrel(row)
+      ? [{
+          id: row.id,
+          merchantId: row.merchantId,
+          posProvider: row.posProvider,
+          locationId: row.locationId,
+          lineId: row.lineId,
+          kegId: row.kegId,
+          brand: row.brand,
+          groupName: row.groupName,
+          externalProductIds: row.externalProductIds ?? null,
+          volumeMl: row.volumeMl,
+          pricePaidCents: row.pricePaidCents,
+          mlConsumed: row.mlConsumed,
+          mermaMl: row.mermaMl,
+          status: row.status,
+          openedAt: row.openedAt,
+        }]
+      : []
+  );
 }

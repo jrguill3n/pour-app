@@ -1170,7 +1170,7 @@ export function DetailPanel({
           >
             {isEmpty
               ? "Sin barril activo"
-              : `Activo desde ${fmtDate(barrel.openedAt)}`}
+              : `Activo desde ${fmtDate(barrel.openedAt ?? new Date().toISOString())}`}
           </div>
         </div>
         <button

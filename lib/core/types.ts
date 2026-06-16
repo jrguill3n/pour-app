@@ -36,7 +36,7 @@ export interface Barrel {
   dbId?: string;
   kegId: string;
   location_id: string | null;
-  lineId: number;
+  lineId: number | null;
   brand: string;
   group: string;
   beerStyle: string;
@@ -47,9 +47,9 @@ export interface Barrel {
   volumeMl?: number | null;
   pricePaid: number;
   pricePaidCents?: number | null;
-  openedAt: string;
+  openedAt: string | null;
   openedBy: string;
-  status: "active" | "closed";
+  status: "active" | "closed" | "reserve";
   mlConsumed: number;
   mermaMl: number;
   closedAt: string | null;

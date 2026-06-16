@@ -49,6 +49,10 @@ export interface ProductCupMlInput {
   cupMl?: number | null;
 }
 
+export interface ReserveActivationInput {
+  externalProductIds: string[];
+}
+
 export interface OperationalLineInput {
   lineNumber: number;
   note?: string | null;
@@ -59,6 +63,12 @@ export interface OperationalBarrelLineInput {
   status: string;
 }
 
+export interface SyncableActiveBarrelInput {
+  status: string;
+  lineId: number | null;
+  openedAt: unknown | null;
+}
+
 export interface OperationalBarrelEditInput {
   pricePaid?: number | null;
   volumeL?: number | null;
@@ -67,10 +77,28 @@ export interface OperationalBarrelEditInput {
 
 export interface ActiveBarrelMovedAuditEvent {
   event: "active_barrel_moved";
-  from_line: number;
+  from_line: number | null;
   to_line: number;
   timestamp: string;
-  moved_by: string;
+  user: string;
+  message: string;
+}
+
+export interface ReserveCreatedAuditEvent {
+  event: "reserve_created";
+  from_line: null;
+  to_line: null;
+  timestamp: string;
+  user: string;
+  message: string;
+}
+
+export interface ReserveActivatedAuditEvent {
+  event: "reserve_activated";
+  from_line: null;
+  to_line: number;
+  timestamp: string;
+  user: string;
   message: string;
 }
 
@@ -94,6 +122,12 @@ export function occupiedLineNumbers(barrels: OperationalBarrelLineInput[]): numb
   ].sort((a, b) => a - b);
 }
 
+export function isSyncableActiveBarrel<T extends SyncableActiveBarrelInput>(
+  barrel: T
+): barrel is T & { lineId: number; openedAt: Exclude<T["openedAt"], null> } {
+  return barrel.status === "active" && barrel.lineId !== null && barrel.openedAt !== null;
+}
+
 export function canOpenLine(
   lineNumber: number,
   lines: OperationalLineInput[],
@@ -114,9 +148,9 @@ export function availableMoveDestinationLines(
 }
 
 export function activeBarrelMovedAuditEvent(input: {
-  fromLine: number;
+  fromLine: number | null;
   toLine: number;
-  movedBy: string;
+  user: string;
   movedAt: Date;
 }): ActiveBarrelMovedAuditEvent {
   const timestamp = input.movedAt.toISOString();
@@ -126,8 +160,53 @@ export function activeBarrelMovedAuditEvent(input: {
     from_line: input.fromLine,
     to_line: input.toLine,
     timestamp,
-    moved_by: input.movedBy,
-    message: `Moved from Line ${input.fromLine} to Line ${input.toLine} by ${input.movedBy} at ${timestamp}`,
+    user: input.user,
+    message: `Moved from Line ${input.fromLine ?? "reserve"} to Line ${input.toLine} by ${input.user} at ${timestamp}`,
+  };
+}
+
+export function reserveActivationErrors(
+  reserve: ReserveActivationInput,
+  products: ProductCupMlInput[]
+): string[] {
+  if (reserve.externalProductIds.length === 0) {
+    return ["linked_product_required"];
+  }
+
+  const missingCupMl = findMappedProductsMissingCupMl(reserve.externalProductIds, products, {});
+  return missingCupMl.length > 0 ? ["cup_ml_required"] : [];
+}
+
+export function reserveCreatedAuditEvent(input: {
+  user: string;
+  createdAt: Date;
+}): ReserveCreatedAuditEvent {
+  const timestamp = input.createdAt.toISOString();
+
+  return {
+    event: "reserve_created",
+    from_line: null,
+    to_line: null,
+    timestamp,
+    user: input.user,
+    message: `Reserve barrel created by ${input.user} at ${timestamp}`,
+  };
+}
+
+export function reserveActivatedAuditEvent(input: {
+  toLine: number;
+  user: string;
+  activatedAt: Date;
+}): ReserveActivatedAuditEvent {
+  const timestamp = input.activatedAt.toISOString();
+
+  return {
+    event: "reserve_activated",
+    from_line: null,
+    to_line: input.toLine,
+    timestamp,
+    user: input.user,
+    message: `Reserve barrel activated on Line ${input.toLine} by ${input.user} at ${timestamp}`,
   };
 }
 

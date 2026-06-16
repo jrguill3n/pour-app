@@ -358,4 +358,46 @@ describe("calculateBarrelConsumption", () => {
       calculateBarrelConsumption(barrels, sales, cupMap)
     );
   });
+
+  it("keeps consumption continuous when a barrel moves lines", () => {
+    const sales = [
+      {
+        id: "before-move",
+        created_at: "2026-06-16T02:31:00.000Z",
+        gross_cents: 12000,
+        discount_cents: 0,
+        net_cents: 12000,
+        line_items: [{ external_product_id: "pinta-lupulosa", quantity: 1, gross_cents: 12000 }],
+      },
+      {
+        id: "after-move",
+        created_at: "2026-06-16T02:40:00.000Z",
+        gross_cents: 12000,
+        discount_cents: 0,
+        net_cents: 12000,
+        line_items: [{ external_product_id: "pinta-lupulosa", quantity: 1, gross_cents: 12000 }],
+      },
+    ];
+
+    expect(
+      calculateBarrelConsumption(
+        [{ id: "barrel-1", externalProductIds: ["pinta-lupulosa"], opened_at: "2026-06-16T02:30:00.000Z" }],
+        sales,
+        { "pinta-lupulosa": 355 }
+      )
+    ).toEqual(
+      calculateBarrelConsumption(
+        [{ id: "barrel-1", externalProductIds: ["pinta-lupulosa"], opened_at: "2026-06-16T02:30:00.000Z" }],
+        sales,
+        { "pinta-lupulosa": 355 }
+      )
+    );
+    expect(
+      calculateBarrelConsumption(
+        [{ id: "barrel-1", externalProductIds: ["pinta-lupulosa"], opened_at: "2026-06-16T02:30:00.000Z" }],
+        sales,
+        { "pinta-lupulosa": 355 }
+      )["barrel-1"].ml_consumed
+    ).toBe(710);
+  });
 });

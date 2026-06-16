@@ -13,6 +13,7 @@ import { DetailPanel } from "./detail-panel";
 import { DashboardTab } from "./dashboard-tab";
 import { OperationsTab } from "./operations-tab";
 import { DebugBadge } from "./debug-badge";
+import { ProductSelector } from "./product-selector";
 
 const initialState = getKegBoardInitialState();
 
@@ -67,7 +68,7 @@ interface OperationalStatusResponse {
       id: string;
       merchantId: string;
       posProvider: string;
-      lineId: number;
+      lineId: number | null;
       kegId: string | null;
       brand: string | null;
       groupName: string | null;
@@ -82,7 +83,7 @@ interface OperationalStatusResponse {
       revenueDescuentosCents: number;
       revenueNetoCents: number;
       status: string;
-      openedAt: string;
+      openedAt: string | null;
       openedBy: string | null;
       closedAt: string | null;
       closedBy: string | null;
@@ -150,7 +151,7 @@ function barrelFromOperational(
     pricePaidCents: barrel.pricePaidCents,
     openedAt: barrel.openedAt,
     openedBy: barrel.openedBy ?? "",
-    status: barrel.status === "closed" ? "closed" : "active",
+    status: barrel.status === "closed" ? "closed" : barrel.status === "reserve" ? "reserve" : "active",
     mlConsumed: barrel.mlConsumed,
     mermaMl: barrel.mermaMl,
     closedAt: barrel.closedAt,
@@ -172,6 +173,29 @@ export function KegBoard() {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [lines, setLines] = useState<Line[]>(initialState.lines);
   const [selectedLineId, setSelectedLineId] = useState<number | null>(1);
+  const [reserveFormOpen, setReserveFormOpen] = useState(false);
+  const [reserveEditId, setReserveEditId] = useState<number | null>(null);
+  const [reserveActivateLineById, setReserveActivateLineById] = useState<Record<number, number | null>>({});
+  const [reserveErrors, setReserveErrors] = useState<Record<number | "create", string | null>>({ create: null });
+  const [reserveForm, setReserveForm] = useState({
+    brand: "",
+    group: "",
+    beerStyle: "",
+    abv: "",
+    external_product_ids: [] as string[],
+    volumeL: "",
+    pricePaid: "",
+    notes: "",
+  });
+  const [reserveEditForm, setReserveEditForm] = useState({
+    brand: "",
+    group: "",
+    beerStyle: "",
+    abv: "",
+    external_product_ids: [] as string[],
+    volumeL: "",
+    pricePaid: "",
+  });
   const [barConfig, setBarConfig] = useState<BarConfig>(initialState.barConfig);
   const [_menuConfig] = useState<MenuConfig>(initialState.menuConfig);
   const currentEmployee = initialState.employees[0];
@@ -234,6 +258,8 @@ export function KegBoard() {
   const selectedBarrel = selectedLineId ? getBarrel(selectedLineId) : undefined;
 
   const activeCount = lines.filter((l) => getBarrel(l.id)).length;
+  const reserveBarrels = barrels.filter((barrel) => barrel.status === "reserve");
+  const emptyLines = lines.filter((line) => !getBarrel(line.id));
   const lowCount = lines.filter((l) => {
     const b = getBarrel(l.id);
     return b && remPct(b.mlConsumed, b.volumeL * 1000) < 20;
@@ -312,6 +338,201 @@ export function KegBoard() {
         closedBy: null,
       },
     ]);
+  }
+
+  async function handleCreateReserve() {
+    setReserveErrors((items) => ({ ...items, create: null }));
+    const volumeL = reserveForm.volumeL ? parseFloat(reserveForm.volumeL) : null;
+    const pricePaid = reserveForm.pricePaid ? parseFloat(reserveForm.pricePaid) : null;
+    const payload = {
+      status: "reserve",
+      brand: reserveForm.brand || null,
+      group_name: reserveForm.group || null,
+      beer_style: reserveForm.beerStyle || null,
+      abv: reserveForm.abv ? parseFloat(reserveForm.abv) : null,
+      external_product_ids: reserveForm.external_product_ids,
+      volume_l: Number.isFinite(volumeL) ? volumeL : null,
+      price_paid: Number.isFinite(pricePaid) ? pricePaid : null,
+      opened_by: currentEmployee,
+      notes: reserveForm.notes || null,
+    };
+
+    if (dataMode === "connected" && operationalContext) {
+      const response = await fetch("/api/ops/barrels", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          merchant_id: operationalContext.merchantId,
+          pos_provider: operationalContext.posProvider,
+          ...payload,
+        }),
+      });
+      const result = (await response.json()) as OperationalStatusResponse & { error?: string };
+
+      if (!response.ok || !result.ok) {
+        setReserveErrors((items) => ({ ...items, create: result.error ?? "No se pudo crear la reserva." }));
+        return false;
+      }
+
+      setLines((result.snapshot?.lines ?? []).map(lineFromOperational));
+      setBarrels((result.snapshot?.barrels ?? []).map(barrelFromOperational));
+      setProducts((result.snapshot?.mappingProducts ?? []).map(productFromOperational));
+      setOperationalContext(result.snapshot?.context ?? operationalContext);
+    } else {
+      const now = new Date().toISOString();
+      setBarrels((items) => [
+        ...items,
+        {
+          id: Date.now(),
+          kegId: `RES-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`,
+          lineId: null,
+          brand: reserveForm.brand || "Reserva",
+          group: reserveForm.group || "Barril de reserva",
+          beerStyle: reserveForm.beerStyle || "",
+          abv: reserveForm.abv ? parseFloat(reserveForm.abv) : null,
+          external_product_ids: reserveForm.external_product_ids,
+          pos_provider: "mock",
+          location_id: null,
+          volumeL: Number.isFinite(volumeL) && volumeL ? volumeL : 0,
+          volumeMl: Number.isFinite(volumeL) && volumeL ? Math.round(volumeL * 1000) : 0,
+          pricePaid: Number.isFinite(pricePaid) && pricePaid ? pricePaid : 0,
+          pricePaidCents: Number.isFinite(pricePaid) && pricePaid !== null ? Math.round(pricePaid * 100) : null,
+          openedAt: null,
+          openedBy: "",
+          status: "reserve",
+          mlConsumed: 0,
+          mermaMl: 0,
+          closedAt: null,
+          closedBy: null,
+          editedAt: now,
+          editedBy: currentEmployee,
+        },
+      ]);
+    }
+
+    setReserveForm({
+      brand: "",
+      group: "",
+      beerStyle: "",
+      abv: "",
+      external_product_ids: [],
+      volumeL: "",
+      pricePaid: "",
+      notes: "",
+    });
+    setReserveFormOpen(false);
+    return true;
+  }
+
+  async function handleActivateReserve(barrelId: number, destinationLineId: number) {
+    const currentBarrel = barrels.find((barrel) => barrel.id === barrelId);
+    if (!currentBarrel) return false;
+
+    if (currentBarrel.external_product_ids.length === 0) {
+      setReserveErrors((items) => ({ ...items, [barrelId]: "Agrega al menos un producto vinculado antes de activar." }));
+      return false;
+    }
+
+    const missingCupMl = products
+      .filter((product) => currentBarrel.external_product_ids.includes(product.external_product_id))
+      .filter((product) => !Number.isFinite(product.cupMl) || product.cupMl <= 0)
+      .map((product) => product.variant);
+
+    if (missingCupMl.length > 0) {
+      setReserveErrors((items) => ({ ...items, [barrelId]: "Configura cup_ml para los productos vinculados antes de activar." }));
+      return false;
+    }
+
+    if (getBarrel(destinationLineId)) {
+      setReserveErrors((items) => ({ ...items, [barrelId]: "La línea destino ya está ocupada." }));
+      return false;
+    }
+
+    if (dataMode === "connected" && operationalContext) {
+      if (!currentBarrel.dbId) return false;
+      const response = await fetch("/api/ops/barrels", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "activate",
+          merchant_id: operationalContext.merchantId,
+          pos_provider: operationalContext.posProvider,
+          barrel_id: currentBarrel.dbId,
+          destination_line_id: destinationLineId,
+          activated_by: currentEmployee,
+        }),
+      });
+      const result = (await response.json()) as OperationalStatusResponse & { error?: string };
+
+      if (!response.ok || !result.ok) {
+        setReserveErrors((items) => ({ ...items, [barrelId]: result.error ?? "No se pudo activar la reserva." }));
+        return false;
+      }
+
+      setLines((result.snapshot?.lines ?? []).map(lineFromOperational));
+      setBarrels((result.snapshot?.barrels ?? []).map(barrelFromOperational));
+      setProducts((result.snapshot?.mappingProducts ?? []).map(productFromOperational));
+      setOperationalContext(result.snapshot?.context ?? operationalContext);
+      setSelectedLineId(destinationLineId);
+    } else {
+      const now = new Date().toISOString();
+      setBarrels((items) =>
+        items.map((barrel) =>
+          barrel.id === barrelId
+            ? {
+                ...barrel,
+                lineId: destinationLineId,
+                status: "active",
+                openedAt: now,
+                openedBy: currentEmployee,
+                editedAt: now,
+                editedBy: currentEmployee,
+              }
+            : barrel
+        )
+      );
+      setSelectedLineId(destinationLineId);
+    }
+
+    setReserveErrors((items) => ({ ...items, [barrelId]: null }));
+    setReserveActivateLineById((items) => ({ ...items, [barrelId]: null }));
+    return true;
+  }
+
+  function startReserveEdit(barrel: Barrel) {
+    setReserveEditId(barrel.id);
+    setReserveEditForm({
+      brand: barrel.brand ?? "",
+      group: barrel.group ?? "",
+      beerStyle: barrel.beerStyle ?? "",
+      abv: barrel.abv ? String(barrel.abv) : "",
+      external_product_ids: barrel.external_product_ids,
+      volumeL: barrel.volumeMl && barrel.volumeMl > 0 ? String(barrel.volumeMl / 1000) : "",
+      pricePaid: barrel.pricePaidCents !== null && barrel.pricePaidCents !== undefined ? String(barrel.pricePaidCents / 100) : "",
+    });
+    setReserveErrors((items) => ({ ...items, [barrel.id]: null }));
+  }
+
+  async function handleSaveReserveEdit(barrelId: number) {
+    const volumeL = reserveEditForm.volumeL ? parseFloat(reserveEditForm.volumeL) : null;
+    const pricePaid = reserveEditForm.pricePaid ? parseFloat(reserveEditForm.pricePaid) : null;
+    const ok = await handleEdit(barrelId, {
+      brand: reserveEditForm.brand || undefined,
+      group: reserveEditForm.group || undefined,
+      beerStyle: reserveEditForm.beerStyle || undefined,
+      abv: reserveEditForm.abv ? parseFloat(reserveEditForm.abv) : null,
+      external_product_ids: reserveEditForm.external_product_ids,
+      volumeL: Number.isFinite(volumeL) ? volumeL : null,
+      pricePaid: Number.isFinite(pricePaid) ? pricePaid : null,
+    });
+
+    if (ok === false) {
+      setReserveErrors((items) => ({ ...items, [barrelId]: "No se pudo guardar la reserva." }));
+      return false;
+    }
+
+    setReserveEditId(null);
+    return true;
   }
 
   async function handleClose(barrelId: number, mermaMl: number, closedBy: string) {
@@ -693,6 +914,7 @@ export function KegBoard() {
                   ...(lowCount > 0
                     ? [{ count: lowCount, label: "Bajas", bg: "#fffbeb", border: "#fde68a", color: "#d97706" }]
                     : []),
+                  { count: reserveBarrels.length, label: "Reserva", bg: "#eff6ff", border: "#bfdbfe", color: "#2563eb" },
                   { count: emptyCount, label: "Libres", bg: "#f9fafb", border: "#e5e7eb", color: "#9ca3af" },
                 ].map(({ count, label, bg, border, color }) => (
                   <div
@@ -714,6 +936,16 @@ export function KegBoard() {
                     </div>
                   </div>
                 ))}
+                <button
+                  onClick={() => setReserveFormOpen((value) => !value)}
+                  className="px-3 py-2 rounded-md text-xs font-semibold"
+                  style={{
+                    background: "linear-gradient(135deg,#9f1239,#f43f5e)",
+                    color: "#fff",
+                  }}
+                >
+                  + Reserva
+                </button>
               </div>
             </div>
 
@@ -839,6 +1071,305 @@ export function KegBoard() {
                     })}
                   </div>
                 )}
+
+                <div className="mt-5">
+                  <div className="flex items-center justify-between mb-2">
+                    <div>
+                      <div
+                        className="text-sm font-semibold"
+                        style={{ color: darkMode ? "#e2e8f0" : "#111827" }}
+                      >
+                        Barriles de reserva
+                      </div>
+                      <div className="text-[11px] text-muted-foreground">
+                        Preparados, sin línea asignada
+                      </div>
+                    </div>
+                    {!reserveFormOpen && (
+                      <button
+                        onClick={() => setReserveFormOpen(true)}
+                        className="px-3 py-1.5 rounded-md text-xs font-semibold"
+                        style={{
+                          background: darkMode ? "#151820" : "#fff",
+                          border: `1.5px solid ${darkMode ? "#2a3050" : "#e5e7eb"}`,
+                          color: darkMode ? "#94a3b8" : "#374151",
+                        }}
+                      >
+                        + Crear reserva
+                      </button>
+                    )}
+                  </div>
+
+                  {reserveFormOpen && (
+                    <div
+                      className="rounded-lg p-3 mb-3"
+                      style={{
+                        background: darkMode ? "#151820" : "#fff",
+                        border: `1.5px solid ${darkMode ? "#2a3050" : "#e5e7eb"}`,
+                      }}
+                    >
+                      <div className="grid grid-cols-2 gap-2 mb-2">
+                        <input
+                          value={reserveForm.brand}
+                          onChange={(event) => setReserveForm((form) => ({ ...form, brand: event.target.value }))}
+                          placeholder="Cervecería"
+                          className="rounded-md px-3 py-2 text-xs"
+                          style={{ border: "1px solid #e5e7eb" }}
+                        />
+                        <input
+                          value={reserveForm.group}
+                          onChange={(event) => setReserveForm((form) => ({ ...form, group: event.target.value }))}
+                          placeholder="Nombre de cerveza"
+                          className="rounded-md px-3 py-2 text-xs"
+                          style={{ border: "1px solid #e5e7eb" }}
+                        />
+                        <input
+                          value={reserveForm.beerStyle}
+                          onChange={(event) => setReserveForm((form) => ({ ...form, beerStyle: event.target.value }))}
+                          placeholder="Estilo"
+                          className="rounded-md px-3 py-2 text-xs"
+                          style={{ border: "1px solid #e5e7eb" }}
+                        />
+                        <input
+                          value={reserveForm.abv}
+                          onChange={(event) => setReserveForm((form) => ({ ...form, abv: event.target.value }))}
+                          placeholder="ABV"
+                          className="rounded-md px-3 py-2 text-xs"
+                          style={{ border: "1px solid #e5e7eb" }}
+                        />
+                        <input
+                          value={reserveForm.volumeL}
+                          onChange={(event) => setReserveForm((form) => ({ ...form, volumeL: event.target.value }))}
+                          placeholder="Volumen L"
+                          className="rounded-md px-3 py-2 text-xs"
+                          style={{ border: "1px solid #e5e7eb" }}
+                        />
+                        <input
+                          value={reserveForm.pricePaid}
+                          onChange={(event) => setReserveForm((form) => ({ ...form, pricePaid: event.target.value }))}
+                          placeholder="Costo barril"
+                          className="rounded-md px-3 py-2 text-xs"
+                          style={{ border: "1px solid #e5e7eb" }}
+                        />
+                      </div>
+                      <ProductSelector
+                        products={products}
+                        selected={reserveForm.external_product_ids}
+                        onChange={(externalProductIds) =>
+                          setReserveForm((form) => ({ ...form, external_product_ids: externalProductIds }))
+                        }
+                        darkMode={darkMode}
+                      />
+                      <input
+                        value={reserveForm.notes}
+                        onChange={(event) => setReserveForm((form) => ({ ...form, notes: event.target.value }))}
+                        placeholder="Notas"
+                        className="rounded-md px-3 py-2 text-xs mt-2 w-full"
+                        style={{ border: "1px solid #e5e7eb" }}
+                      />
+                      {reserveErrors.create && (
+                        <div className="text-xs text-red-600 mt-2">{reserveErrors.create}</div>
+                      )}
+                      <div className="flex justify-end gap-2 mt-3">
+                        <button
+                          onClick={() => setReserveFormOpen(false)}
+                          className="px-3 py-2 rounded-md text-xs"
+                          style={{
+                            border: `1px solid ${darkMode ? "#2a3050" : "#e5e7eb"}`,
+                            color: darkMode ? "#94a3b8" : "#6b7280",
+                          }}
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          onClick={() => void handleCreateReserve()}
+                          className="px-3 py-2 rounded-md text-xs font-semibold text-white"
+                          style={{ background: "linear-gradient(135deg,#9f1239,#f43f5e)" }}
+                        >
+                          Guardar reserva
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {reserveBarrels.length === 0 ? (
+                    <div
+                      className="rounded-lg px-3 py-4 text-xs text-center"
+                      style={{
+                        background: darkMode ? "#151820" : "#fff",
+                        border: `1.5px dashed ${darkMode ? "#2a3050" : "#d1d5db"}`,
+                        color: darkMode ? "#475569" : "#9ca3af",
+                      }}
+                    >
+                      No hay barriles de reserva.
+                    </div>
+                  ) : (
+                    <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }}>
+                      {reserveBarrels.map((reserve) => {
+                        const selectedDestination = reserveActivateLineById[reserve.id] ?? null;
+                        const linkedProducts = products.filter((product) =>
+                          reserve.external_product_ids.includes(product.external_product_id)
+                        );
+
+                        return (
+                          <div
+                            key={reserve.id}
+                            className="rounded-lg p-3"
+                            style={{
+                              background: darkMode ? "#151820" : "#fff",
+                              border: `1.5px solid ${darkMode ? "#2a3050" : "#e5e7eb"}`,
+                            }}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <div className="text-[10px] uppercase tracking-wide text-blue-500 font-semibold">
+                                  Reserva
+                                </div>
+                                <div
+                                  className="text-sm font-bold overflow-hidden text-ellipsis whitespace-nowrap"
+                                  style={{ color: darkMode ? "#e2e8f0" : "#111827" }}
+                                >
+                                  {reserve.group || "Barril sin nombre"}
+                                </div>
+                                {reserve.brand && (
+                                  <div className="text-[11px] text-muted-foreground">{reserve.brand}</div>
+                                )}
+                              </div>
+                              <div className="font-mono text-[10px] text-muted-foreground shrink-0">
+                                {reserve.volumeMl ? `${reserve.volumeMl / 1000}L` : "Vol. n/r"}
+                              </div>
+                            </div>
+                            {reserveEditId === reserve.id ? (
+                              <div className="mt-3">
+                                <div className="grid grid-cols-2 gap-2 mb-2">
+                                  <input
+                                    value={reserveEditForm.brand}
+                                    onChange={(event) => setReserveEditForm((form) => ({ ...form, brand: event.target.value }))}
+                                    placeholder="Cervecería"
+                                    className="rounded-md px-2 py-1.5 text-xs"
+                                    style={{ border: "1px solid #e5e7eb" }}
+                                  />
+                                  <input
+                                    value={reserveEditForm.group}
+                                    onChange={(event) => setReserveEditForm((form) => ({ ...form, group: event.target.value }))}
+                                    placeholder="Cerveza"
+                                    className="rounded-md px-2 py-1.5 text-xs"
+                                    style={{ border: "1px solid #e5e7eb" }}
+                                  />
+                                  <input
+                                    value={reserveEditForm.volumeL}
+                                    onChange={(event) => setReserveEditForm((form) => ({ ...form, volumeL: event.target.value }))}
+                                    placeholder="Volumen L"
+                                    className="rounded-md px-2 py-1.5 text-xs"
+                                    style={{ border: "1px solid #e5e7eb" }}
+                                  />
+                                  <input
+                                    value={reserveEditForm.pricePaid}
+                                    onChange={(event) => setReserveEditForm((form) => ({ ...form, pricePaid: event.target.value }))}
+                                    placeholder="Costo"
+                                    className="rounded-md px-2 py-1.5 text-xs"
+                                    style={{ border: "1px solid #e5e7eb" }}
+                                  />
+                                </div>
+                                <ProductSelector
+                                  products={products}
+                                  selected={reserveEditForm.external_product_ids}
+                                  onChange={(externalProductIds) =>
+                                    setReserveEditForm((form) => ({ ...form, external_product_ids: externalProductIds }))
+                                  }
+                                  darkMode={darkMode}
+                                />
+                                <div className="flex justify-end gap-2 mt-2">
+                                  <button
+                                    onClick={() => setReserveEditId(null)}
+                                    className="px-2.5 py-1.5 rounded-md text-xs"
+                                    style={{ border: "1px solid #e5e7eb", color: "#6b7280" }}
+                                  >
+                                    Cancelar
+                                  </button>
+                                  <button
+                                    onClick={() => void handleSaveReserveEdit(reserve.id)}
+                                    className="px-2.5 py-1.5 rounded-md text-xs font-semibold text-white"
+                                    style={{ background: "#111827" }}
+                                  >
+                                    Guardar
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => startReserveEdit(reserve)}
+                                className="mt-2 text-[11px] font-medium"
+                                style={{ color: "#f43f5e" }}
+                              >
+                                Editar reserva
+                              </button>
+                            )}
+                            <div className="flex flex-wrap gap-1 mt-2">
+                              {linkedProducts.length === 0 ? (
+                                <span className="text-[11px] text-amber-600 bg-amber-50 rounded px-2 py-0.5">
+                                  Sin producto vinculado
+                                </span>
+                              ) : (
+                                linkedProducts.slice(0, 3).map((product) => (
+                                  <span
+                                    key={product.external_product_id}
+                                    className="text-[11px] bg-muted rounded px-2 py-0.5"
+                                  >
+                                    {product.variant} · {product.cupMl || 0}ml
+                                  </span>
+                                ))
+                              )}
+                            </div>
+                            <div className="flex gap-2 mt-3">
+                              <select
+                                value={selectedDestination ?? ""}
+                                onChange={(event) =>
+                                  setReserveActivateLineById((items) => ({
+                                    ...items,
+                                    [reserve.id]: event.target.value ? Number(event.target.value) : null,
+                                  }))
+                                }
+                                className="flex-1 rounded-md px-2 py-2 text-xs"
+                                style={{ border: "1px solid #e5e7eb" }}
+                              >
+                                <option value="">Línea destino</option>
+                                {emptyLines.map((line) => (
+                                  <option key={line.id} value={line.id}>
+                                    Línea {String(line.id).padStart(2, "0")}
+                                  </option>
+                                ))}
+                              </select>
+                              <button
+                                disabled={!selectedDestination}
+                                onClick={() =>
+                                  selectedDestination
+                                    ? void handleActivateReserve(reserve.id, selectedDestination)
+                                    : undefined
+                                }
+                                className="px-3 py-2 rounded-md text-xs font-semibold"
+                                style={{
+                                  background: selectedDestination ? "#111827" : "#f3f4f6",
+                                  color: selectedDestination ? "#fff" : "#9ca3af",
+                                }}
+                              >
+                                Activar
+                              </button>
+                            </div>
+                            {reserveErrors[reserve.id] && (
+                              <div className="text-xs text-red-600 mt-2">{reserveErrors[reserve.id]}</div>
+                            )}
+                            {(reserve.volumeMl === 0 || reserve.pricePaidCents === null) && (
+                              <div className="text-[11px] text-amber-600 mt-2">
+                                Volumen o costo no registrado.
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Detail */}
@@ -1104,7 +1635,7 @@ export function KegBoard() {
                             {b.group}
                           </div>
                           <div className="text-[11px] text-muted-foreground mt-0.5">
-                            {new Date(b.openedAt).toLocaleDateString("es-MX", {
+                            {new Date(b.openedAt ?? b.closedAt ?? Date.now()).toLocaleDateString("es-MX", {
                               day: "2-digit",
                               month: "short",
                             })}{" "}

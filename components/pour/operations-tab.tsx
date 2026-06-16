@@ -51,7 +51,7 @@ interface OperationalProductCategory {
 
 interface OperationalBarrel {
   id: string;
-  lineId: number;
+  lineId: number | null;
   kegId: string | null;
   brand: string | null;
   groupName: string | null;
@@ -63,7 +63,7 @@ interface OperationalBarrel {
   revenueDescuentosCents: number;
   revenueNetoCents: number;
   status: string;
-  openedAt: string;
+  openedAt: string | null;
   closedAt: string | null;
   closedBy: string | null;
 }
@@ -776,7 +776,7 @@ export function OperationsTab({
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <div className="font-mono text-[10px] text-muted-foreground">
-                            Linea {String(barrel.lineId).padStart(2, "0")} · {barrel.kegId ?? barrel.id}
+                            Linea {String(barrel.lineId ?? 0).padStart(2, "0")} · {barrel.kegId ?? barrel.id}
                           </div>
                           <div className="text-sm font-bold mt-1" style={{ color: text }}>
                             {barrel.groupName ?? "Barril sin nombre"}
@@ -910,7 +910,7 @@ export function OperationsTab({
                           {barrel.groupName ?? barrel.kegId ?? barrel.id}
                         </div>
                         <div className="text-[10px] text-muted-foreground">
-                          {fmtDate(barrel.openedAt)} - {fmtDate(barrel.closedAt)}
+                          {fmtDate(barrel.openedAt ?? barrel.closedAt)} - {fmtDate(barrel.closedAt)}
                         </div>
                         {historyWarnings.length > 0 && (
                           <div className="text-[10px] mt-1" style={{ color: "#d97706" }}>

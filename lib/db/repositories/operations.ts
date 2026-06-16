@@ -12,6 +12,8 @@ import {
   hasRealConnectedAccount,
   hasConfiguredDraftCategories,
   normalizeOperationalBarrelEdit,
+  reserveActivatedAuditEvent,
+  reserveCreatedAuditEvent,
   volumeLToVolumeMl,
 } from "./operations-boundary";
 import { validateBarrelClose } from "@/lib/core/barrel-close";
@@ -77,7 +79,7 @@ export interface OperationalBarrel {
   id: string;
   merchantId: string;
   posProvider: string;
-  lineId: number;
+  lineId: number | null;
   kegId: string | null;
   brand: string | null;
   groupName: string | null;
@@ -93,7 +95,7 @@ export interface OperationalBarrel {
   revenueDescuentosCents: number;
   revenueNetoCents: number;
   status: string;
-  openedAt: string;
+  openedAt: string | null;
   openedBy: string | null;
   closedAt: string | null;
   closedBy: string | null;
@@ -150,6 +152,10 @@ function barrelEntityId(context: OperationalContext, lineId: number, openedAt: D
   return `${context.posProvider}:${context.merchantId}:barrel:${lineId}:${openedAt.getTime()}`;
 }
 
+function reserveBarrelEntityId(context: OperationalContext, createdAt: Date): string {
+  return `${context.posProvider}:${context.merchantId}:reserve:${createdAt.getTime()}`;
+}
+
 let postgresBarrelInsertSchemaChecked = false;
 
 async function ensurePostgresBarrelInsertSchema() {
@@ -177,6 +183,10 @@ async function ensurePostgresBarrelInsertSchema() {
           alter column external_product_ids type text[]
           using external_product_ids::text[];
       end if;
+      alter table public.barrels
+        alter column line_id drop not null;
+      alter table public.barrels
+        alter column opened_at drop not null;
     end $$;
   `);
   postgresBarrelInsertSchemaChecked = true;
@@ -415,7 +425,7 @@ export async function getOperationalSnapshot(
         revenueDescuentosCents: row.revenueDescuentosCents,
         revenueNetoCents: row.revenueNetoCents,
         status: row.status,
-        openedAt: toIso(row.openedAt) ?? new Date().toISOString(),
+        openedAt: toIso(row.openedAt),
         openedBy: row.openedBy,
         closedAt: toIso(row.closedAt),
         closedBy: row.closedBy,
@@ -551,7 +561,7 @@ export async function getOperationalSnapshot(
       revenueDescuentosCents: row.revenueDescuentosCents,
       revenueNetoCents: row.revenueNetoCents,
       status: row.status,
-      openedAt: toIso(row.openedAt) ?? new Date().toISOString(),
+      openedAt: toIso(row.openedAt),
       openedBy: row.openedBy,
       closedAt: toIso(row.closedAt),
       closedBy: row.closedBy,
@@ -615,6 +625,18 @@ export interface CreateOperationalBarrelInput {
   openedBy?: string | null;
 }
 
+export interface CreateReserveBarrelInput {
+  brand?: string | null;
+  groupName?: string | null;
+  beerStyle?: string | null;
+  abv?: number | null;
+  externalProductIds?: string[];
+  volumeL?: number | null;
+  pricePaid?: number | null;
+  createdBy?: string | null;
+  notes?: string | null;
+}
+
 export interface UpdateOperationalBarrelInput {
   brand?: string | null;
   groupName?: string | null;
@@ -638,6 +660,12 @@ export interface MoveOperationalBarrelInput {
   movedAt?: Date;
 }
 
+export interface ActivateReserveBarrelInput {
+  destinationLineId: number;
+  openedBy: string;
+  openedAt?: Date;
+}
+
 function rawRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? { ...(value as Record<string, unknown>) }
@@ -646,16 +674,34 @@ function rawRecord(value: unknown): Record<string, unknown> {
 
 function appendMoveEvent(
   raw: unknown,
-  event: ReturnType<typeof activeBarrelMovedAuditEvent>
+  event:
+    | ReturnType<typeof activeBarrelMovedAuditEvent>
+    | ReturnType<typeof reserveCreatedAuditEvent>
+    | ReturnType<typeof reserveActivatedAuditEvent>
 ) {
   const nextRaw = rawRecord(raw);
-  const existingEvents = Array.isArray(nextRaw.move_events) ? nextRaw.move_events : [];
+  const existingEvents = Array.isArray(nextRaw.audit_events)
+    ? nextRaw.audit_events
+    : Array.isArray(nextRaw.move_events)
+      ? nextRaw.move_events
+      : [];
+  const auditEvents = [...existingEvents, event];
 
   return {
     ...nextRaw,
     source: nextRaw.source ?? "pour-local",
-    move_events: [...existingEvents, event],
+    audit_events: auditEvents,
+    move_events: auditEvents,
+    last_audit_event: event,
     last_move_event: event,
+  };
+}
+
+function appendEditMetadata(raw: unknown, input: UpdateOperationalBarrelInput) {
+  return {
+    ...rawRecord(raw),
+    source: "pour-local-edit",
+    last_edit_input: input,
   };
 }
 
@@ -739,6 +785,64 @@ export async function createOperationalBarrel(
   return getOperationalSnapshot(context.posProvider);
 }
 
+export async function createReserveOperationalBarrel(
+  context: OperationalContext,
+  input: CreateReserveBarrelInput
+): Promise<OperationalSnapshot> {
+  const runtime = getDatabase();
+  const createdAt = new Date();
+  const createdBy = input.createdBy?.trim() || "No registrado";
+  const id = reserveBarrelEntityId(context, createdAt);
+  const kegId = `RES-${createdAt.getFullYear()}-${String(createdAt.getTime()).slice(-6)}`;
+  const reserveEvent = reserveCreatedAuditEvent({ user: createdBy, createdAt });
+  const values = {
+    id,
+    merchantId: context.merchantId,
+    posProvider: context.posProvider,
+    lineId: null,
+    kegId,
+    brand: input.brand?.trim() || null,
+    groupName: input.groupName?.trim() || null,
+    beerStyle: input.beerStyle?.trim() || null,
+    abv: input.abv && Number.isFinite(input.abv) ? Math.round(input.abv * 100) : null,
+    externalProductIds: input.externalProductIds ?? [],
+    volumeMl:
+      typeof input.volumeL === "number" && Number.isFinite(input.volumeL) && input.volumeL > 0
+        ? volumeLToVolumeMl(input.volumeL)
+        : 0,
+    pricePaidCents:
+      typeof input.pricePaid === "number" && Number.isFinite(input.pricePaid) && input.pricePaid >= 0
+        ? Math.round(input.pricePaid * 100)
+        : null,
+    mlConsumed: 0,
+    mermaMl: 0,
+    revenueBrutoCents: 0,
+    revenueDescuentosCents: 0,
+    revenueNetoCents: 0,
+    status: "reserve",
+    openedAt: null,
+    openedBy: null,
+    raw: {
+      source: "pour-local-reserve",
+      notes: input.notes?.trim() || null,
+      audit_events: [reserveEvent],
+      move_events: [reserveEvent],
+      last_audit_event: reserveEvent,
+      last_move_event: reserveEvent,
+    },
+    updatedAt: createdAt,
+  };
+
+  if (runtime.dialect === "postgres") {
+    await ensurePostgresBarrelInsertSchema();
+    await runtime.db.insert(pg.barrels).values(values);
+    return getOperationalSnapshot(context.posProvider);
+  }
+
+  await runtime.db.insert(sqlite.barrels).values(values);
+  return getOperationalSnapshot(context.posProvider);
+}
+
 export async function updateOperationalBarrel(
   context: OperationalContext,
   barrelId: string,
@@ -751,7 +855,7 @@ export async function updateOperationalBarrel(
     volumeL: input.volumeL,
     openedBy: input.openedBy,
   });
-  const values = {
+  const baseValues = {
     ...(input.brand !== undefined ? { brand: input.brand } : {}),
     ...(input.groupName !== undefined ? { groupName: input.groupName } : {}),
     ...(input.beerStyle !== undefined ? { beerStyle: input.beerStyle } : {}),
@@ -762,14 +866,25 @@ export async function updateOperationalBarrel(
     ...(input.volumeL !== undefined ? { volumeMl: normalized.volumeMl ?? 0 } : {}),
     ...(input.pricePaid !== undefined ? { pricePaidCents: normalized.pricePaidCents } : {}),
     ...(input.openedBy !== undefined ? { openedBy: normalized.openedBy } : {}),
-    raw: { source: "pour-local-edit", input },
     updatedAt: now,
   };
 
   if (runtime.dialect === "postgres") {
+    const [current] = await runtime.db
+      .select({ raw: pg.barrels.raw })
+      .from(pg.barrels)
+      .where(
+        and(
+          eq(pg.barrels.id, barrelId),
+          eq(pg.barrels.merchantId, context.merchantId),
+          eq(pg.barrels.posProvider, context.posProvider)
+        )
+      )
+      .limit(1);
+
     await runtime.db
       .update(pg.barrels)
-      .set(values)
+      .set({ ...baseValues, raw: appendEditMetadata(current?.raw, input) })
       .where(
         and(
           eq(pg.barrels.id, barrelId),
@@ -780,9 +895,21 @@ export async function updateOperationalBarrel(
     return getOperationalSnapshot(context.posProvider);
   }
 
+  const [current] = await runtime.db
+    .select({ raw: sqlite.barrels.raw })
+    .from(sqlite.barrels)
+    .where(
+      and(
+        eq(sqlite.barrels.id, barrelId),
+        eq(sqlite.barrels.merchantId, context.merchantId),
+        eq(sqlite.barrels.posProvider, context.posProvider)
+      )
+    )
+    .limit(1);
+
   await runtime.db
     .update(sqlite.barrels)
-    .set(values)
+    .set({ ...baseValues, raw: appendEditMetadata(current?.raw, input) })
     .where(
       and(
         eq(sqlite.barrels.id, barrelId),
@@ -862,7 +989,7 @@ export async function moveOperationalBarrel(
     const event = activeBarrelMovedAuditEvent({
       fromLine: current.lineId,
       toLine: destinationLineId,
-      movedBy,
+      user: movedBy,
       movedAt,
     });
 
@@ -931,7 +1058,7 @@ export async function moveOperationalBarrel(
   const event = activeBarrelMovedAuditEvent({
     fromLine: current.lineId,
     toLine: destinationLineId,
-    movedBy,
+    user: movedBy,
     movedAt,
   });
 
@@ -941,6 +1068,168 @@ export async function moveOperationalBarrel(
       lineId: destinationLineId,
       raw: appendMoveEvent(current.raw, event),
       updatedAt: movedAt,
+    })
+    .where(
+      and(
+        eq(sqlite.barrels.id, barrelId),
+        eq(sqlite.barrels.merchantId, context.merchantId),
+        eq(sqlite.barrels.posProvider, context.posProvider)
+      )
+    );
+  return getOperationalSnapshot(context.posProvider);
+}
+
+export async function activateReserveOperationalBarrel(
+  context: OperationalContext,
+  barrelId: string,
+  input: ActivateReserveBarrelInput
+): Promise<OperationalSnapshot> {
+  const runtime = getDatabase();
+  const openedAt = input.openedAt ?? new Date();
+  const destinationLineId = input.destinationLineId;
+  const openedBy = input.openedBy.trim();
+
+  if (!Number.isInteger(destinationLineId) || destinationLineId <= 0) {
+    throw new Error("invalid_destination_line");
+  }
+
+  if (!openedBy) {
+    throw new Error("opened_by_required");
+  }
+
+  await ensureDefaultLines(context);
+
+  if (runtime.dialect === "postgres") {
+    await ensurePostgresBarrelInsertSchema();
+    const [current] = await runtime.db
+      .select()
+      .from(pg.barrels)
+      .where(
+        and(
+          eq(pg.barrels.id, barrelId),
+          eq(pg.barrels.merchantId, context.merchantId),
+          eq(pg.barrels.posProvider, context.posProvider)
+        )
+      )
+      .limit(1);
+
+    if (!current) throw new Error("barrel_not_found");
+    if (current.status !== "reserve") throw new Error("barrel_activate_not_reserve");
+
+    const destinationLine = await runtime.db
+      .select({ id: pg.lines.id })
+      .from(pg.lines)
+      .where(
+        and(
+          eq(pg.lines.merchantId, context.merchantId),
+          eq(pg.lines.posProvider, context.posProvider),
+          eq(pg.lines.lineNumber, destinationLineId)
+        )
+      )
+      .limit(1);
+
+    if (destinationLine.length === 0) throw new Error("destination_line_not_found");
+
+    const occupied = await runtime.db
+      .select({ id: pg.barrels.id })
+      .from(pg.barrels)
+      .where(
+        and(
+          eq(pg.barrels.merchantId, context.merchantId),
+          eq(pg.barrels.posProvider, context.posProvider),
+          eq(pg.barrels.lineId, destinationLineId),
+          eq(pg.barrels.status, "active")
+        )
+      )
+      .limit(1);
+
+    if (occupied.length > 0) throw new Error("destination_line_occupied");
+
+    const event = reserveActivatedAuditEvent({
+      toLine: destinationLineId,
+      user: openedBy,
+      activatedAt: openedAt,
+    });
+
+    await runtime.db
+      .update(pg.barrels)
+      .set({
+        lineId: destinationLineId,
+        status: "active",
+        openedAt,
+        openedBy,
+        raw: appendMoveEvent(current.raw, event),
+        updatedAt: openedAt,
+      })
+      .where(
+        and(
+          eq(pg.barrels.id, barrelId),
+          eq(pg.barrels.merchantId, context.merchantId),
+          eq(pg.barrels.posProvider, context.posProvider)
+        )
+      );
+    return getOperationalSnapshot(context.posProvider);
+  }
+
+  const [current] = await runtime.db
+    .select()
+    .from(sqlite.barrels)
+    .where(
+      and(
+        eq(sqlite.barrels.id, barrelId),
+        eq(sqlite.barrels.merchantId, context.merchantId),
+        eq(sqlite.barrels.posProvider, context.posProvider)
+      )
+    )
+    .limit(1);
+
+  if (!current) throw new Error("barrel_not_found");
+  if (current.status !== "reserve") throw new Error("barrel_activate_not_reserve");
+
+  const destinationLine = await runtime.db
+    .select({ id: sqlite.lines.id })
+    .from(sqlite.lines)
+    .where(
+      and(
+        eq(sqlite.lines.merchantId, context.merchantId),
+        eq(sqlite.lines.posProvider, context.posProvider),
+        eq(sqlite.lines.lineNumber, destinationLineId)
+      )
+    )
+    .limit(1);
+
+  if (destinationLine.length === 0) throw new Error("destination_line_not_found");
+
+  const occupied = await runtime.db
+    .select({ id: sqlite.barrels.id })
+    .from(sqlite.barrels)
+    .where(
+      and(
+        eq(sqlite.barrels.merchantId, context.merchantId),
+        eq(sqlite.barrels.posProvider, context.posProvider),
+        eq(sqlite.barrels.lineId, destinationLineId),
+        eq(sqlite.barrels.status, "active")
+      )
+    )
+    .limit(1);
+
+  if (occupied.length > 0) throw new Error("destination_line_occupied");
+
+  const event = reserveActivatedAuditEvent({
+    toLine: destinationLineId,
+    user: openedBy,
+    activatedAt: openedAt,
+  });
+
+  await runtime.db
+    .update(sqlite.barrels)
+    .set({
+      lineId: destinationLineId,
+      status: "active",
+      openedAt,
+      openedBy,
+      raw: appendMoveEvent(current.raw, event),
+      updatedAt: openedAt,
     })
     .where(
       and(
@@ -995,7 +1284,7 @@ export async function closeOperationalBarrel(
     grossRevenueCents: current.revenueBrutoCents,
     discountRevenueCents: current.revenueDescuentosCents,
     netRevenueCents: current.revenueNetoCents,
-    openedAt: current.openedAt,
+    openedAt: current.openedAt ?? closedAt,
     closedAt,
     closedBy: input.closedBy,
   });
