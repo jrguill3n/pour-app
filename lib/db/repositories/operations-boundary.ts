@@ -65,6 +65,15 @@ export interface OperationalBarrelEditInput {
   openedBy?: string | null;
 }
 
+export interface ActiveBarrelMovedAuditEvent {
+  event: "active_barrel_moved";
+  from_line: number;
+  to_line: number;
+  timestamp: string;
+  moved_by: string;
+  message: string;
+}
+
 export function defaultOperationalLines(count = 15): OperationalLineInput[] {
   return Array.from({ length: count }, (_, index) => {
     const lineNumber = index + 1;
@@ -92,6 +101,34 @@ export function canOpenLine(
 ): boolean {
   return lines.some((line) => line.lineNumber === lineNumber) &&
     !occupiedLineNumbers(barrels).includes(lineNumber);
+}
+
+export function availableMoveDestinationLines(
+  sourceLineNumber: number,
+  lines: OperationalLineInput[],
+  barrels: OperationalBarrelLineInput[]
+): OperationalLineInput[] {
+  const occupied = new Set(occupiedLineNumbers(barrels));
+
+  return lines.filter((line) => line.lineNumber !== sourceLineNumber && !occupied.has(line.lineNumber));
+}
+
+export function activeBarrelMovedAuditEvent(input: {
+  fromLine: number;
+  toLine: number;
+  movedBy: string;
+  movedAt: Date;
+}): ActiveBarrelMovedAuditEvent {
+  const timestamp = input.movedAt.toISOString();
+
+  return {
+    event: "active_barrel_moved",
+    from_line: input.fromLine,
+    to_line: input.toLine,
+    timestamp,
+    moved_by: input.movedBy,
+    message: `Moved from Line ${input.fromLine} to Line ${input.toLine} by ${input.movedBy} at ${timestamp}`,
+  };
 }
 
 export function volumeLToVolumeMl(volumeL: number): number {

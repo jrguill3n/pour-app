@@ -424,6 +424,63 @@ export function KegBoard() {
     return true;
   }
 
+  async function handleMove(barrelId: number, destinationLineId: number, movedBy: string) {
+    if (dataMode === "connected" && operationalContext) {
+      const currentBarrel = barrels.find((barrel) => barrel.id === barrelId);
+      if (!currentBarrel?.dbId) {
+        console.warn("Could not move local barrel because the persisted id is missing.", { barrelId });
+        return false;
+      }
+
+      const response = await fetch("/api/ops/barrels", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "move",
+          merchant_id: operationalContext.merchantId,
+          pos_provider: operationalContext.posProvider,
+          barrel_id: currentBarrel.dbId,
+          destination_line_id: destinationLineId,
+          moved_by: movedBy,
+        }),
+      });
+      const result = (await response.json()) as OperationalStatusResponse & { error?: string };
+
+      if (!response.ok || !result.ok) {
+        console.warn("Could not move local barrel.", { error: result.error, barrelId: currentBarrel.dbId, destinationLineId });
+        return false;
+      }
+
+      setLines((result.snapshot?.lines ?? []).map(lineFromOperational));
+      setBarrels((result.snapshot?.barrels ?? []).map(barrelFromOperational));
+      setProducts((result.snapshot?.mappingProducts ?? []).map(productFromOperational));
+      setOperationalContext(result.snapshot?.context ?? operationalContext);
+      setSelectedLineId(destinationLineId);
+      return true;
+    }
+
+    const destinationOccupied = barrels.some(
+      (barrel) => barrel.status === "active" && barrel.lineId === destinationLineId && barrel.id !== barrelId
+    );
+
+    if (destinationOccupied) return false;
+
+    setBarrels((bs) =>
+      bs.map((b) =>
+        b.id === barrelId
+          ? {
+              ...b,
+              lineId: destinationLineId,
+              editedAt: new Date().toISOString(),
+              editedBy: movedBy,
+            }
+          : b
+      )
+    );
+    setSelectedLineId(destinationLineId);
+    return true;
+  }
+
   function handleVoid(barrelId: number) {
     setBarrels((bs) =>
       bs.map((b) => (b.id === barrelId ? { ...b, voided: !b.voided } : b))
@@ -803,10 +860,12 @@ export function KegBoard() {
                     onOpen={handleOpen}
                     onClose={handleClose}
                     onEdit={handleEdit}
+                    onMove={handleMove}
                     onDeselect={() => setSelectedLineId(null)}
                     onSaveTemplate={handleSaveTemplate}
                     barConfig={barConfig}
                     allBarrels={barrels}
+                    lines={lines}
                     darkMode={darkMode}
                   />
                 </div>
